@@ -1,0 +1,12 @@
+[Unit]
+Description=HomeStream media server
+
+[Service]
+ExecStart=%h/Projects/HomeStream/homestream
+EnvironmentFile=%h/.config/homestream/env
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

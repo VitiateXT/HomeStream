@@ -1,0 +1,187 @@
+<!doctype html>
+<!--
+  HomeStream web page: the whole user interface in one file, no framework and
+  no build step. It is compiled into the server binary (see main.go).
+
+  The page contains no media data. It is public, but everything it shows comes
+  from /api/index, which needs a login.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>HomeStream</title>
+<style>
+/* Colors in one place: background, text, dimmed text, divider lines, accent. */
+:root{--bg:#111;--fg:#eee;--dim:#888;--line:#2a2a2a;--acc:#6cf}
+*{box-sizing:border-box}
+/* Make the hidden attribute win over display:flex and friends below. */
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif}
+
+/* Page width and the 16px side gutter that keeps content off the screen edge on phones. */
+main,form{max-width:900px;margin:0 auto;padding:0 16px}
+
+/* Login form */
+form{padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
+input,button{font:inherit;color:inherit;background:#1d1d1d;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+input{flex:1;min-width:0}
+button{background:var(--acc);color:#000;border:0}
+#err{width:100%;margin:0;color:#f77}
+
+/* Search box and breadcrumb path */
+#q{width:100%;margin-top:12px}
+nav{margin:8px 0;color:var(--dim);overflow-wrap:anywhere}
+a{color:var(--acc);text-decoration:none}
+
+/* Player and its caption */
+video,audio{width:100%;margin-top:8px}
+video{max-height:55vh;background:#000}
+#cap{margin:4px 0 8px;color:var(--dim);font-size:14px}
+
+/* File and folder list: name on the left, size or folder on the right. */
+ul{list-style:none;margin:0;padding:0}
+li a{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);color:var(--fg)}
+li span{overflow-wrap:anywhere}
+li small{color:var(--dim);white-space:nowrap}
+</style>
+</head>
+<body>
+<!-- Shown only when the server answers 401 (not logged in). -->
+<form id="login" hidden>
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button>Sign in</button>
+  <p id="err"></p>
+</form>
+
+<!-- The library browser. Shown once the file list has loaded. -->
+<main id="app" hidden>
+  <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
+  <nav id="crumbs"></nav>
+  <div id="player"></div>
+  <ul id="list"></ul>
+</main>
+<script>
+/*
+  How this page works
+
+  - On load it fetches /api/index, a flat list of every file: [{p: path, s: size}].
+    A 401 answer means "not logged in", so the login form is shown instead.
+  - The list is fetched once. Folders, breadcrumbs and search are all computed
+    in the browser from it.
+  - The current folder lives in the URL hash (#/Films), so the back button and
+    bookmarks work.
+  - Playing a file just points a <video> or <audio> element at /m/<path>. The
+    browser does the buffering and seeking itself with HTTP Range requests.
+*/
+
+// Shorthand for document.querySelector.
+const $ = s => document.querySelector(s);
+// URL-encode a path one segment at a time, keeping the slashes. This is needed
+// because file names contain characters like # ? % and |.
+const enc = p => p.split('/').map(encodeURIComponent).join('/');
+// Natural sort: "Part 2" comes before "Part 10".
+const nat = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+// Display name of a file: last path segment, without the extension and without
+// the trailing " [youtubeId]" that yt-dlp adds to downloads.
+const title = p => p.split('/').pop().replace(/\.[^.]+$/, '').replace(/ \[[\w-]{11}\]$/, '');
+// Human-readable file size.
+const size = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
+// Most search results shown at once, to keep the page fast.
+const MAX = 200;
+// Every file in the library, as returned by /api/index.
+let files = [];
+
+// Fetch the file list and show either the library or the login form.
+async function load() {
+  const r = await fetch('/api/index');
+  $('#login').hidden = r.ok;
+  $('#app').hidden = !r.ok;
+  if (r.ok) { files = await r.json(); render(); } else $('#pw').focus();
+}
+
+// Send the password to the server. On success the server sets the session
+// cookie and we reload the file list.
+$('#login').onsubmit = async e => {
+  e.preventDefault();
+  const r = await fetch('/api/login', {method: 'POST', body: $('#pw').value});
+  $('#err').textContent = r.ok ? '' : 'Wrong password';
+  if (r.ok) { $('#pw').value = ''; load(); }
+};
+
+// Make a link element. Text is set with textContent, never as HTML, so a file
+// name containing < or & cannot inject markup.
+function link(href, text) {
+  const a = document.createElement('a');
+  a.href = href; a.textContent = text;
+  return a;
+}
+
+// Make one list row: a name on the left and a small note on the right. If
+// onclick is given, clicking runs it instead of following the link.
+function row(href, text, meta, onclick) {
+  const li = document.createElement('li'), a = link(href, ''), s = document.createElement('span'), m = document.createElement('small');
+  s.textContent = text; m.textContent = meta;
+  if (onclick) a.onclick = e => { e.preventDefault(); onclick(); };
+  a.append(s, m); li.append(a);
+  return li;
+}
+
+// Start playing file f at the top of the page. Video files get a <video>,
+// everything else an <audio>. playsInline stops iPhones from forcing
+// fullscreen. Starting from a tap or click is what allows autoplay.
+function play(f) {
+  const el = document.createElement(/\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
+  el.controls = el.autoplay = el.playsInline = true;
+  el.src = '/m/' + enc(f.p);
+  const cap = document.createElement('p');
+  cap.id = 'cap'; cap.textContent = document.title = title(f.p);
+  $('#player').replaceChildren(el, cap);
+  scrollTo(0, 0);
+}
+
+// Redraw breadcrumbs and the list. With text in the search box it shows
+// matches from the whole library; otherwise it shows the current folder.
+function render() {
+  // Current folder from the URL hash ("#/Films" -> "Films"). A malformed hash
+  // falls back to the top level.
+  let dir = '';
+  try { dir = decodeURIComponent(location.hash.slice(2)); } catch {}
+  const words = $('#q').value.toLowerCase().split(/\s+/).filter(Boolean);
+
+  // Breadcrumbs: Home / Folder / Subfolder, each part a link to that folder.
+  const parts = dir ? dir.split('/') : [];
+  $('#crumbs').replaceChildren(link('#/', 'Home'), ...parts.flatMap((p, i) =>
+    [' / ', link('#/' + encodeURIComponent(parts.slice(0, i + 1).join('/')), p)]));
+
+  let rows;
+  if (words.length) {
+    // Search: a file matches if its full path contains every typed word. The
+    // note on the right is the folder it lives in.
+    const hits = files.filter(f => words.every(w => f.p.toLowerCase().includes(w)));
+    rows = hits.slice(0, MAX).map(f => row('#', title(f.p), f.p.split('/').slice(-2, -1)[0] || '', () => play(f)));
+    if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, ''));
+  } else {
+    // Browse: split everything below the current folder into direct files and
+    // direct subfolders (with a count of the files inside each).
+    const pre = dir ? dir + '/' : '', dirs = new Map(), here = [];
+    for (const f of files) {
+      if (!f.p.startsWith(pre)) continue;
+      const rest = f.p.slice(pre.length), i = rest.indexOf('/');
+      if (i < 0) here.push(f); else dirs.set(rest.slice(0, i), (dirs.get(rest.slice(0, i)) || 0) + 1);
+    }
+    // Folders first, then files, each in natural order.
+    rows = [...[...dirs].sort((a, b) => nat(a[0], b[0])).map(([d, n]) => row('#/' + encodeURIComponent(pre + d), d + '/', n + ' files')),
+            ...here.sort((a, b) => nat(a.p, b.p)).map(f => row('#', title(f.p), size(f.s), () => play(f)))];
+  }
+  $('#list').replaceChildren(...rows);
+}
+
+// Typing in the search box redraws the list. Changing folder clears the search.
+$('#q').oninput = render;
+onhashchange = () => { $('#q').value = ''; render(); };
+load();
+</script>
+</body>
+</html>
