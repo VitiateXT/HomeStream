@@ -4,10 +4,11 @@
 //
 // Routes:
 //
-//	GET  /           the web page (index.html), public
-//	POST /api/login  checks the password and sets the session cookie
-//	GET  /api/index  JSON list of all playable files, login required
-//	GET  /m/<path>   one media file with Range support (seeking), login required
+//	GET  /            the web page (index.html), public
+//	POST /api/login   checks the password and sets the session cookie
+//	POST /api/logout  deletes the session cookie
+//	GET  /api/index   JSON list of all playable files, login required
+//	GET  /m/<path>    one media file with Range support (seeking), login required
 //
 // Configuration is read from environment variables:
 //
@@ -110,7 +111,7 @@ func newServer(root, password string) (*server, error) {
 	return s, err
 }
 
-// routes builds the request handler. Only the page and the login endpoint are
+// routes builds the request handler. Only the page, login and logout are
 // public; everything that exposes file names or content goes through auth.
 // The whole thing is wrapped in guard, which enforces the LAN-only rule.
 func (s *server) routes() http.Handler {
@@ -120,6 +121,7 @@ func (s *server) routes() http.Handler {
 		w.Write(indexHTML)
 	})
 	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/logout", logout)
 	mux.HandleFunc("GET /api/index", s.auth(s.index))
 	mux.HandleFunc("GET /m/{p...}", s.auth(s.media))
 	return guard(mux)
@@ -127,7 +129,10 @@ func (s *server) routes() http.Handler {
 
 // hidden reports whether a single path segment must never be listed or
 // served: dotfiles and dot-folders (such as .Trash-1000) and lost+found.
-func hidden(name string) bool { return strings.HasPrefix(name, ".") || name == "lost+found" }
+// A name starting with "..." is an ordinary title, not a hidden file.
+func hidden(name string) bool {
+	return strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "...") || name == "lost+found"
+}
 
 // allowed reports whether a cleaned, slash-separated path relative to the
 // media root may be listed and served. It is the single gatekeeper used by
@@ -233,6 +238,15 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// logout deletes the session cookie in the browser that asks (MaxAge -1).
+//
+// Sessions are stateless, so the server cannot cancel a token: a copy of the
+// cookie kept elsewhere stays valid until it expires. Restarting the server
+// ends every session.
+func logout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: "hs", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+}
+
 // index answers with the list of every servable file as JSON. It walks the
 // media folder on each request, which is fast enough for thousands of files.
 // The web page builds folders and search from this one flat list.
@@ -278,7 +292,15 @@ func (s *server) media(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(filepath.Join(s.root, filepath.FromSlash(rel)))
+	// EvalSymlinks returns the path unchanged unless a symlink is involved.
+	// Refuse those, as the index does: a link named x.mp4 could point at any
+	// file outside the media folder.
+	full := filepath.Join(s.root, filepath.FromSlash(rel))
+	if p, err := filepath.EvalSymlinks(full); err != nil || p != full {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(full)
 	if err != nil {
 		http.NotFound(w, r)
 		return

@@ -17,6 +17,7 @@ func TestAllowed(t *testing.T) {
 		"Films/300.mp4": true, "a/b.MP3": true, "a/b [x].opus": true,
 		"a/b.txt": false, "a/b.mp4.part": false, ".Trash-1000/x.mp4": false,
 		"a/.hid/x.mp4": false, "lost+found/x.mp3": false, "": false, "a//b.mp4": false,
+		"a/...title.mp4": true, "a/._junk.mp4": false, "../x.mp4": false,
 	} {
 		if got := allowed(rel); got != want {
 			t.Errorf("allowed(%q) = %v, want %v", rel, got, want)
@@ -37,11 +38,15 @@ func TestIsLAN(t *testing.T) {
 }
 
 func testServer(t *testing.T) http.Handler {
-	root := t.TempDir()
-	for _, p := range []string{"a/b.mp4", "a/c.txt", ".hid/d.mp4", "lost+found/e.mp3", "f.MP3"} {
+	// The media root is a subfolder, so that ../secret.mp4 is a real media file
+	// just outside it: the only thing keeping it private is the ".." handling.
+	root := filepath.Join(t.TempDir(), "lib")
+	for _, p := range []string{"a/b.mp4", "a/c.txt", ".hid/d.mp4", "lost+found/e.mp3", "f.MP3", "../secret.mp4"} {
 		os.MkdirAll(filepath.Join(root, filepath.Dir(p)), 0o755)
 		os.WriteFile(filepath.Join(root, p), []byte("0123456789"), 0o644)
 	}
+	os.Symlink(filepath.Join(root, "a/c.txt"), filepath.Join(root, "link.mp4"))
+	os.Symlink(filepath.Join(root, "a"), filepath.Join(root, "dirlink"))
 	s, err := newServer(root, "pw")
 	if err != nil {
 		t.Fatal(err)
@@ -122,9 +127,17 @@ func TestFlow(t *testing.T) {
 		t.Errorf("range = %d %q %q", w.Code, w.Header().Get("Content-Range"), w.Body.String())
 	}
 
-	for _, p := range []string{"/m/a/c.txt", "/m/.hid/d.mp4", "/m/lost+found/e.mp3", "/m/nope.mp4", "/m/..%2f..%2fetc%2fpasswd", "/m/a/../../../etc/passwd"} {
+	for _, p := range []string{
+		"/m/a/c.txt", "/m/.hid/d.mp4", "/m/lost+found/e.mp3", "/m/nope.mp4", "/m/link.mp4", "/m/dirlink/b.mp4",
+		"/m/../secret.mp4", "/m/..%2fsecret.mp4", "/m/%2e%2e/secret.mp4", "/m/a/..%2f..%2fsecret.mp4",
+	} {
 		if c := do(h, "GET", p, "", authed).Code; c == 200 {
 			t.Errorf("GET %s = 200, want a refusal", p)
 		}
+	}
+
+	out := do(h, "POST", "/api/logout", "", authed).Result().Cookies()
+	if len(out) != 1 || out[0].Name != "hs" || out[0].Value != "" || out[0].MaxAge >= 0 {
+		t.Errorf("logout cookies = %+v, want one empty, expired hs cookie", out)
 	}
 }

@@ -36,7 +36,7 @@ folders and the search from that list. Playing a file points a standard
 
 1. Build:
 
-   ```
+   ```bash
    go build -trimpath -ldflags="-s -w" -o homestream
    ```
 
@@ -44,7 +44,7 @@ folders and the search from that list. Playing a file points a standard
    creates a small private certificate authority. Replace `192.168.1.10` with
    the LAN address of this machine:
 
-   ```
+   ```bash
    mkcert -install
    mkdir -p ~/.config/homestream
    mkcert -cert-file ~/.config/homestream/cert.pem \
@@ -55,7 +55,7 @@ folders and the search from that list. Playing a file points a standard
 3. Store the password. It is typed hidden and saved in a file only you can
    read. Avoid the characters `"` and `\` in it.
 
-   ```
+   ```bash
    read -rsp 'Password: ' p; echo
    (umask 077; echo "HS_PASSWORD=$p" > ~/.config/homestream/env); unset p
    ```
@@ -64,7 +64,7 @@ folders and the search from that list. Playing a file points a standard
    binary at `~/Projects/HomeStream/homestream`; edit `homestream.service` if
    you keep it somewhere else.
 
-   ```
+   ```bash
    mkdir -p ~/.config/systemd/user
    cp homestream.service ~/.config/systemd/user/
    systemctl --user daemon-reload
@@ -74,7 +74,7 @@ folders and the search from that list. Playing a file points a standard
 
 5. Allow only your home network through the firewall (adjust the network):
 
-   ```
+   ```bash
    sudo ufw allow from 192.168.1.0/24 to any port 8443 proto tcp
    ```
 
@@ -122,8 +122,8 @@ service the same way.
 - Everything is encrypted with TLS (HTTPS).
 - One shared password, no user accounts. A wrong password is delayed by one
   second and attempts are handled one at a time, so guessing is slow.
-- A login lasts 30 days and is kept in a signed cookie. Restarting the server
-  logs everyone out.
+- A login lasts 30 days and is kept in a signed cookie. "Sign out" removes it
+  from that browser. Restarting the server logs everyone out.
 - Only the file types listed above are served. Hidden files and folders
   (names starting with a dot) and `lost+found` are never listed or served, and
   paths cannot climb out of the media folder.
@@ -135,11 +135,12 @@ service the same way.
 - No transcoding. Files in formats your device cannot decode (for example AV1
   or 10-bit H.264 on older devices) will not play.
 - No posters, descriptions, subtitles or "resume where I stopped".
-- Symbolic links inside the media folder are not listed.
+- Symbolic links inside the media folder are ignored: neither listed nor
+  served.
 
 ## Development
 
-```
+```bash
 go vet ./...
 go test ./...
 ```

@@ -30,8 +30,9 @@ input{flex:1;min-width:0}
 button{background:var(--acc);color:#000;border:0}
 #err{width:100%;margin:0;color:#f77}
 
-/* Search box and breadcrumb path */
-#q{width:100%;margin-top:12px}
+/* Top row (search box and a quiet sign-out button), then the breadcrumb path */
+#top{display:flex;gap:8px;margin-top:12px}
+#out{background:none;color:var(--dim);border:1px solid var(--line);white-space:nowrap}
 nav{margin:8px 0;color:var(--dim);overflow-wrap:anywhere}
 a{color:var(--acc);text-decoration:none}
 
@@ -57,7 +58,10 @@ li small{color:var(--dim);white-space:nowrap}
 
 <!-- The library browser. Shown once the file list has loaded. -->
 <main id="app" hidden>
-  <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
+  <div id="top">
+    <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
+    <button id="out">Sign out</button>
+  </div>
   <nav id="crumbs"></nav>
   <div id="player"></div>
   <ul id="list"></ul>
@@ -81,8 +85,9 @@ const $ = s => document.querySelector(s);
 // URL-encode a path one segment at a time, keeping the slashes. This is needed
 // because file names contain characters like # ? % and |.
 const enc = p => p.split('/').map(encodeURIComponent).join('/');
-// Natural sort: "Part 2" comes before "Part 10".
-const nat = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+// Natural sort: "Part 2" comes before "Part 10". One reused Collator is much
+// faster than calling localeCompare with options for every comparison.
+const nat = new Intl.Collator(undefined, {numeric: true}).compare;
 // Display name of a file: last path segment, without the extension and without
 // the trailing " [youtubeId]" that yt-dlp adds to downloads.
 const title = p => p.split('/').pop().replace(/\.[^.]+$/, '').replace(/ \[[\w-]{11}\]$/, '');
@@ -134,6 +139,9 @@ function row(href, text, meta, onclick) {
 function play(f) {
   const el = document.createElement(/\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
   el.controls = el.autoplay = el.playsInline = true;
+  // If the file fails to load because the login expired (the server was
+  // restarted), reloading the list brings the login form back.
+  el.onerror = load;
   el.src = '/m/' + enc(f.p);
   const cap = document.createElement('p');
   cap.id = 'cap'; cap.textContent = document.title = title(f.p);
@@ -161,7 +169,8 @@ function render() {
     // note on the right is the folder it lives in.
     const hits = files.filter(f => words.every(w => f.p.toLowerCase().includes(w)));
     rows = hits.slice(0, MAX).map(f => row('#', title(f.p), f.p.split('/').slice(-2, -1)[0] || '', () => play(f)));
-    if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, ''));
+    // The no-op click handler keeps this note from acting as a link to Home.
+    if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, '', () => {}));
   } else {
     // Browse: split everything below the current folder into direct files and
     // direct subfolders (with a count of the files inside each).
@@ -177,6 +186,10 @@ function render() {
   }
   $('#list').replaceChildren(...rows);
 }
+
+// Sign out: the server deletes the session cookie. Reloading the page then
+// drops the file list and the player and shows the login form again.
+$('#out').onclick = async () => { await fetch('/api/logout', {method: 'POST'}); location.reload(); };
 
 // Typing in the search box redraws the list. Changing folder clears the search.
 $('#q').oninput = render;
