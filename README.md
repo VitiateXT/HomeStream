@@ -12,6 +12,8 @@ no database and no transcoding.
   straight from a folder.
 - Browse folders or search the whole library.
 - Seeking works, because files are sent with HTTP Range support.
+- Remembers where you stopped, for every file and across all your devices.
+  The start page lists what you played last under "Continue".
 - One password, encrypted with HTTPS, reachable from the local network only.
 - A single 5 MB binary built with the Go standard library.
 
@@ -23,16 +25,41 @@ H.264 video with AAC audio (the usual mp4) plays almost everywhere.
 
 The server lists the library as one JSON file, and the web page builds the
 folders and the search from that list. Playing a file points a standard
-`<video>` or `<audio>` element at the server.
+`<video>` or `<audio>` element at the server. Playback positions are kept in
+one small JSON file on the server.
 
 ## Requirements
 
-- A Linux machine that stays on while you stream.
+- A Linux machine with systemd that stays on while you stream.
 - Go 1.22 or newer, to build it.
 - [mkcert](https://github.com/FiloSottile/mkcert), to create the HTTPS
   certificate. Any other TLS certificate and key also work.
 
+On Debian or Ubuntu: `sudo apt install golang-go mkcert libnss3-tools`.
+
 ## Setup
+
+On a new PC, run the setup script from this folder:
+
+```bash
+./setup.sh
+```
+
+It builds the program, creates the certificate, asks for a password and your
+media folder, installs the service so it starts at boot, and offers to add the
+firewall rule. It then prints the address to open. Two steps use sudo and say
+so first: mkcert adding its certificate authority to this PC, and the firewall
+rule.
+
+Running it again is safe. It keeps the existing certificate and settings,
+rebuilds the program and restarts the service, which logs every device out.
+
+Afterwards, [trust the certificate](#trust-the-certificate-on-your-devices)
+on each device you want to use.
+
+### Manual setup
+
+These are the steps the script performs, if you prefer to do them by hand.
 
 1. Build:
 
@@ -53,12 +80,15 @@ folders and the search from that list. Playing a file points a standard
    ```
 
 3. Store the password. It is typed hidden and saved in a file only you can
-   read. Avoid the characters `"` and `\` in it.
+   read. Avoid quotes, backslashes and a space at either end.
 
    ```bash
    read -rsp 'Password: ' p; echo
    (umask 077; echo "HS_PASSWORD=$p" > ~/.config/homestream/env); unset p
    ```
+
+   If your media is not in `~/Media`, add a line `HS_ROOT=/path/to/media` to
+   that file.
 
 4. Start it as a service that runs at boot. The service file expects the
    binary at `~/Projects/HomeStream/homestream`; edit `homestream.service` if
@@ -82,7 +112,8 @@ folders and the search from that list. Playing a file points a standard
 
 6. Open `https://<hostname>.local:8443` or `https://192.168.1.10:8443`.
 
-To try it in a terminal first: `HS_PASSWORD=test ./homestream`.
+To try it in a terminal without the service, after step 2:
+`HS_PASSWORD=test ./homestream`.
 
 ## Trust the certificate on your devices
 
@@ -100,33 +131,37 @@ copy `rootCA-key.pem`.
 ## Configuration
 
 Set these as environment variables. With the service, put them in
-`~/.config/homestream/env`, one `NAME=value` per line.
+`~/.config/homestream/env`, one `NAME=value` per line. The setup script writes
+`HS_PASSWORD` and `HS_ROOT` there.
 
-| Variable      | Meaning                  | Default                          |
-|---------------|--------------------------|----------------------------------|
-| `HS_PASSWORD` | Login password           | required                         |
-| `HS_ROOT`     | Media folder             | `~/Media`                        |
-| `HS_ADDR`     | Listen address and port  | `:8443`                          |
-| `HS_CERT`     | TLS certificate          | `~/.config/homestream/cert.pem`  |
-| `HS_KEY`      | TLS private key          | `~/.config/homestream/key.pem`   |
+| Variable      | Meaning                  | Default                              |
+|---------------|--------------------------|--------------------------------------|
+| `HS_PASSWORD` | Login password           | required                             |
+| `HS_ROOT`     | Media folder             | `~/Media`                            |
+| `HS_ADDR`     | Listen address and port  | `:8443`                              |
+| `HS_CERT`     | TLS certificate          | `~/.config/homestream/cert.pem`      |
+| `HS_KEY`      | TLS private key          | `~/.config/homestream/key.pem`       |
+| `HS_PROGRESS` | Saved playback positions | `~/.config/homestream/progress.json` |
 
 To change the password, edit the env file and run
 `systemctl --user restart homestream`. After rebuilding the binary, restart the
-service the same way.
+service the same way. To forget all playback positions, stop the service,
+delete `progress.json` and start it again.
 
 ## Security
 
 - LAN only, in three layers: the firewall rule, a check in the server that
-  refuses any client address that is not private or loopback, and no port
-  forwarding on the router.
+  refuses any client without a private (LAN) address, and no port forwarding
+  on the router.
 - Everything is encrypted with TLS (HTTPS).
 - One shared password, no user accounts. A wrong password is delayed by one
   second and attempts are handled one at a time, so guessing is slow.
 - A login lasts 30 days and is kept in a signed cookie. "Sign out" removes it
   from that browser. Restarting the server logs everyone out.
 - Only the file types listed above are served. Hidden files and folders
-  (names starting with a dot) and `lost+found` are never listed or served, and
-  paths cannot climb out of the media folder.
+  (names starting with a dot, except titles starting with `...`) and
+  `lost+found` are never listed or served, and paths cannot climb out of the
+  media folder.
 - The password sits in plain text in the env file, which is readable only by
   you. This is meant for a trusted home network, not for the internet.
 
@@ -134,7 +169,11 @@ service the same way.
 
 - No transcoding. Files in formats your device cannot decode (for example AV1
   or 10-bit H.264 on older devices) will not play.
-- No posters, descriptions, subtitles or "resume where I stopped".
+- No posters, descriptions or subtitles.
+- Playback positions are shared, not per device: the device that saved last
+  wins. A position is saved every 10 seconds and when you pause, seek or leave
+  the page. The first and last 30 seconds of a file count as "not started" and
+  "finished". Renaming or moving a file loses its position.
 - Symbolic links inside the media folder are ignored: neither listed nor
   served.
 
@@ -149,5 +188,6 @@ go test ./...
 |-----------------------|------------------------------------------------------|
 | `main.go`             | The whole server                                     |
 | `index.html`          | The web page, built into the binary                  |
-| `main_test.go`        | Tests for login, hidden files, Range and LAN check   |
+| `main_test.go`        | Tests for login, file access, positions, LAN check   |
 | `homestream.service`  | systemd user service                                 |
+| `setup.sh`            | First-time setup on a new PC                         |

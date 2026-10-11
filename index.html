@@ -3,8 +3,8 @@
   HomeStream web page: the whole user interface in one file, no framework and
   no build step. It is compiled into the server binary (see main.go).
 
-  The page contains no media data. It is public, but everything it shows comes
-  from /api/index, which needs a login.
+  The page itself is public and contains no data. Everything it shows comes
+  from the /api/ addresses, which need a login.
 -->
 <html lang="en">
 <head>
@@ -41,11 +41,13 @@ video,audio{width:100%;margin-top:8px}
 video{max-height:55vh;background:#000}
 #cap{margin:4px 0 8px;color:var(--dim);font-size:14px}
 
-/* File and folder list: name on the left, size or folder on the right. */
+/* File and folder list: name on the left, a small note on the right. */
 ul{list-style:none;margin:0;padding:0}
 li a{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);color:var(--fg)}
 li span{overflow-wrap:anywhere}
 li small{color:var(--dim);white-space:nowrap}
+/* The "Continue" heading above the recently played files on Home. */
+li.h{padding:12px 0 0;color:var(--dim);font-size:14px}
 </style>
 </head>
 <body>
@@ -72,12 +74,15 @@ li small{color:var(--dim);white-space:nowrap}
 
   - On load it fetches /api/index, a flat list of every file: [{p: path, s: size}].
     A 401 answer means "not logged in", so the login form is shown instead.
-  - The list is fetched once. Folders, breadcrumbs and search are all computed
-    in the browser from it.
+  - The list is fetched once per page load. Folders, breadcrumbs and search are
+    all computed in the browser from it.
   - The current folder lives in the URL hash (#/Films), so the back button and
     bookmarks work.
   - Playing a file just points a <video> or <audio> element at /m/<path>. The
     browser does the buffering and seeking itself with HTTP Range requests.
+  - Playback positions live on the server (/api/progress) and are shared by all
+    devices. A player reports its position while it plays, and asks for the
+    latest one whenever playback starts. The last device to save wins.
 */
 
 // Shorthand for document.querySelector.
@@ -95,15 +100,32 @@ const title = p => p.split('/').pop().replace(/\.[^.]+$/, '').replace(/ \[[\w-]{
 const size = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
 // Most search results shown at once, to keep the page fast.
 const MAX = 200;
+// A position in seconds as 8:31 or 1:14:05.
+const clock = t => {
+  const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(Math.floor(t % 60)).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+};
 // Every file in the library, as returned by /api/index.
 let files = [];
+// Saved positions from the server: {path: {t: seconds, at: time of the save}}.
+let prog = {};
+// Saves the position of the current player. Replaced by every play().
+let save = () => {};
+// The note on the right of a file row: its saved position, or else its size.
+const note = f => prog[f.p] ? clock(prog[f.p].t) : size(f.s);
+
+// Fetch the latest saved positions.
+async function sync() {
+  const r = await fetch('/api/progress');
+  if (r.ok) prog = await r.json();
+}
 
 // Fetch the file list and show either the library or the login form.
 async function load() {
   const r = await fetch('/api/index');
   $('#login').hidden = r.ok;
   $('#app').hidden = !r.ok;
-  if (r.ok) { files = await r.json(); render(); } else $('#pw').focus();
+  if (r.ok) { files = await r.json(); await sync(); render(); } else $('#pw').focus();
 }
 
 // Send the password to the server. On success the server sets the session
@@ -125,23 +147,61 @@ function link(href, text) {
 
 // Make one list row: a name on the left and a small note on the right. If
 // onclick is given, clicking runs it instead of following the link.
-function row(href, text, meta, onclick) {
+function row(href, text, small, onclick) {
   const li = document.createElement('li'), a = link(href, ''), s = document.createElement('span'), m = document.createElement('small');
-  s.textContent = text; m.textContent = meta;
+  s.textContent = text; m.textContent = small;
   if (onclick) a.onclick = e => { e.preventDefault(); onclick(); };
   a.append(s, m); li.append(a);
   return li;
 }
 
-// Start playing file f at the top of the page. Video files get a <video>,
-// everything else an <audio>. playsInline stops iPhones from forcing
-// fullscreen. Starting from a tap or click is what allows autoplay.
+// Start playing file f at the top of the page, from its saved position. Video
+// files get a <video>, everything else an <audio>. playsInline stops iPhones
+// from forcing fullscreen. Starting from a tap or click is what allows
+// autoplay, so the player is created at once and the position is fetched
+// alongside.
 function play(f) {
+  save(); // remember where the file that is being replaced stopped
   const el = document.createElement(/\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
   el.controls = el.autoplay = el.playsInline = true;
   // If the file fails to load because the login expired (the server was
   // restarted), reloading the list brings the login form back.
   el.onerror = load;
+
+  // save() reports the position to the server. The first and last 30 seconds
+  // count as "not started" and "finished" and send 0, which clears the entry.
+  // sendBeacon still gets through while the page closes or the phone locks.
+  //
+  // sent is the position this player last reported or was moved to by
+  // resume(). Nothing is sent before the first resume(), or a tap followed by
+  // leaving at once would store 0. Nothing is sent while the position has not
+  // moved, or a player left paused here would overwrite newer progress from
+  // another device. last is the time of the latest save.
+  let sent = null, last = Date.now();
+  save = () => {
+    if (sent === null || !el.duration || el.currentTime === sent) return;
+    sent = el.currentTime;
+    const t = sent < 30 || el.duration - sent < 30 ? 0 : sent;
+    last = Date.now();
+    if (!t && !prog[f.p]) return;
+    if (t) prog[f.p] = {t, at: last / 1000}; else delete prog[f.p];
+    navigator.sendBeacon('/api/progress', JSON.stringify({p: f.p, t}));
+  };
+  // resume() jumps to the position on the server if it is somewhere else,
+  // starting 5 seconds early as a recap. It runs every time playback starts,
+  // so a player left paused here picks up where another device stopped. The
+  // 15 second tolerance keeps a device from jumping because of its own last
+  // save.
+  const resume = async () => {
+    await sync();
+    const t = prog[f.p]?.t;
+    if (t && Math.abs(t - el.currentTime) > 15) el.currentTime = t - 5;
+    sent = el.currentTime;
+  };
+  el.onloadedmetadata = el.onplay = resume;
+  el.onpause = el.onseeked = el.onended = save;
+  // While playing, save every 10 seconds.
+  el.ontimeupdate = () => { if (Date.now() - last > 10000) save(); };
   el.src = '/m/' + enc(f.p);
   const cap = document.createElement('p');
   cap.id = 'cap'; cap.textContent = document.title = title(f.p);
@@ -182,7 +242,16 @@ function render() {
     }
     // Folders first, then files, each in natural order.
     rows = [...[...dirs].sort((a, b) => nat(a[0], b[0])).map(([d, n]) => row('#/' + encodeURIComponent(pre + d), d + '/', n + ' files')),
-            ...here.sort((a, b) => nat(a.p, b.p)).map(f => row('#', title(f.p), size(f.s), () => play(f)))];
+            ...here.sort((a, b) => nat(a.p, b.p)).map(f => row('#', title(f.p), note(f), () => play(f)))];
+    // Home starts with the five most recently played unfinished files. It
+    // looks at the 20 newest positions and skips files that no longer exist.
+    const recent = dir ? [] : Object.keys(prog).sort((a, b) => prog[b].at - prog[a].at).slice(0, 20)
+      .map(p => files.find(f => f.p === p)).filter(Boolean).slice(0, 5);
+    if (recent.length) {
+      const h = document.createElement('li');
+      h.className = 'h'; h.textContent = 'Continue';
+      rows.unshift(h, ...recent.map(f => row('#', title(f.p), note(f), () => play(f))));
+    }
   }
   $('#list').replaceChildren(...rows);
 }
@@ -190,6 +259,12 @@ function render() {
 // Sign out: the server deletes the session cookie. Reloading the page then
 // drops the file list and the player and shows the login form again.
 $('#out').onclick = async () => { await fetch('/api/logout', {method: 'POST'}); location.reload(); };
+
+// Leaving the page (other tab, locked phone, closing) saves the position.
+// Coming back fetches what other devices saved meanwhile.
+document.onvisibilitychange = () => {
+  if (document.hidden) save(); else if (!$('#app').hidden) sync().then(render);
+};
 
 // Typing in the search box redraws the list. Changing folder clears the search.
 $('#q').oninput = render;

@@ -4,11 +4,13 @@
 //
 // Routes:
 //
-//	GET  /            the web page (index.html), public
-//	POST /api/login   checks the password and sets the session cookie
-//	POST /api/logout  deletes the session cookie
-//	GET  /api/index   JSON list of all playable files, login required
-//	GET  /m/<path>    one media file with Range support (seeking), login required
+//	GET  /              the web page (index.html), public
+//	POST /api/login     checks the password and sets the session cookie
+//	POST /api/logout    deletes the session cookie
+//	GET  /api/index     JSON list of all playable files, login required
+//	GET  /api/progress  saved playback positions, login required
+//	POST /api/progress  saves the position of one file, login required
+//	GET  /m/<path>      one media file with Range support (seeking), login required
 //
 // Configuration is read from environment variables:
 //
@@ -17,6 +19,7 @@
 //	HS_ADDR      listen address      (default :8443)
 //	HS_CERT      TLS certificate     (default ~/.config/homestream/cert.pem)
 //	HS_KEY       TLS private key     (default ~/.config/homestream/key.pem)
+//	HS_PROGRESS  saved positions     (default ~/.config/homestream/progress.json)
 package main
 
 import (
@@ -90,15 +93,29 @@ type server struct {
 	secret []byte
 	// delay is the pause after a wrong password.
 	delay time.Duration
-	// mu serialises login attempts so that at most one guess per delay is
-	// possible, however many connections an attacker opens.
-	mu sync.Mutex
+	// loginMu serialises login attempts so that at most one guess per delay
+	// is possible, however many connections an attacker opens.
+	loginMu sync.Mutex
+	// prog holds the saved playback position of every started file, keyed by
+	// its path. There is one password and so one user: all devices share it.
+	prog map[string]pos
+	// progMu guards prog. It is separate from loginMu, which is held for a
+	// whole second after a wrong password and must not hold up saving.
+	progMu sync.Mutex
+	// store is the file prog is saved to. Empty means memory only.
+	store string
+}
+
+// pos is the saved playback position of one file.
+type pos struct {
+	T  float64 `json:"t"`  // seconds from the start
+	At int64   `json:"at"` // Unix time of the save, orders the Continue list
 }
 
 // newServer prepares a server for the media folder root and the given password.
 func newServer(root, password string) (*server, error) {
-	// filepath.WalkDir does not follow a symlinked root, and ~/Media is one
-	// on this machine, so resolve it up front.
+	// The media folder may itself be a symlink. filepath.WalkDir would not
+	// follow it, so resolve it up front.
 	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil, err
@@ -106,9 +123,24 @@ func newServer(root, password string) (*server, error) {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return nil, errors.New(root + " is not a directory")
 	}
-	s := &server{root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second}
+	s := &server{root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second, prog: map[string]pos{}}
 	_, err = rand.Read(s.secret)
 	return s, err
+}
+
+// load reads the saved positions from file and remembers it as the place to
+// save later changes. A missing file is normal on first start. An unreadable
+// one is logged and replaced by the next save.
+func (s *server) load(file string) {
+	s.store = file
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(b, &s.prog); err != nil || s.prog == nil {
+		log.Printf("ignoring unreadable %s: %v", file, err)
+		s.prog = map[string]pos{}
+	}
 }
 
 // routes builds the request handler. Only the page, login and logout are
@@ -123,6 +155,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", logout)
 	mux.HandleFunc("GET /api/index", s.auth(s.index))
+	mux.HandleFunc("GET /api/progress", s.auth(s.progress))
+	mux.HandleFunc("POST /api/progress", s.auth(s.saveProgress))
 	mux.HandleFunc("GET /m/{p...}", s.auth(s.media))
 	return guard(mux)
 }
@@ -136,8 +170,8 @@ func hidden(name string) bool {
 
 // allowed reports whether a cleaned, slash-separated path relative to the
 // media root may be listed and served. It is the single gatekeeper used by
-// both the index and the file download, so a hidden file cannot be fetched
-// by guessing its URL.
+// the index, the file download and the saved positions, so a hidden file
+// cannot be fetched by guessing its URL.
 func allowed(rel string) bool {
 	for _, seg := range strings.Split(rel, "/") {
 		if seg == "" || hidden(seg) {
@@ -165,7 +199,8 @@ func isLAN(remote string) bool {
 }
 
 // guard is the outermost handler. It rejects clients that are not on the LAN,
-// as a second line of defense behind the firewall, and sets security headers.
+// as a second line of defense behind the firewall, and tells browsers not to
+// guess content types.
 func guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isLAN(r.RemoteAddr) {
@@ -216,15 +251,15 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 // sets the session cookie.
 //
 // The password is hashed first so the comparison always works on two
-// fixed-length values and takes the same time for any input. The mutex is held
+// fixed-length values and takes the same time for any input. loginMu is held
 // while sleeping after a wrong password, which means failed attempts are
 // handled one at a time. A correct login can therefore be delayed for a moment
 // while wrong guesses are queued; that is the price of the rate limit.
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	pw, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
 	h := sha256.Sum256(pw)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
 	if subtle.ConstantTimeCompare(h[:], s.pwHash[:]) != 1 {
 		time.Sleep(s.delay)
 		http.Error(w, "wrong password", http.StatusUnauthorized)
@@ -251,8 +286,8 @@ func logout(w http.ResponseWriter, r *http.Request) {
 // media folder on each request, which is fast enough for thousands of files.
 // The web page builds folders and search from this one flat list.
 //
-// Unreadable folders are skipped silently. Symlinks are not listed, because
-// WalkDir does not follow them.
+// Unreadable folders are skipped silently. Symlinks are not listed: WalkDir
+// does not follow linked folders, and linked files are not regular files.
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	out := []entry{}
 	filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
@@ -276,6 +311,51 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+// progress answers with every saved playback position as JSON.
+func (s *server) progress(w http.ResponseWriter, r *http.Request) {
+	s.progMu.Lock()
+	defer s.progMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(s.prog)
+}
+
+// saveProgress stores the position sent as {"p": path, "t": seconds}. A t of
+// zero or less forgets the file, which is how a finished one is cleared.
+//
+// allowed only accepts a clean media path, so nothing else can become a key.
+// The whole map is then written to a temporary file and renamed over the real
+// one. A rename is atomic, so a crash never leaves a half-written file. The
+// map is small and a playing device saves every ten seconds, so this is cheap.
+func (s *server) saveProgress(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		P string  `json:"p"`
+		T float64 `json:"t"`
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in) != nil || !allowed(in.P) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	s.progMu.Lock()
+	defer s.progMu.Unlock()
+	if in.T <= 0 {
+		delete(s.prog, in.P)
+	} else {
+		s.prog[in.P] = pos{in.T, time.Now().Unix()}
+	}
+	if s.store != "" {
+		b, _ := json.Marshal(s.prog)
+		err := os.WriteFile(s.store+".tmp", b, 0o600)
+		if err == nil {
+			err = os.Rename(s.store+".tmp", s.store)
+		}
+		if err != nil {
+			log.Print(err)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // media sends one file from the media folder.
 //
 // http.ServeContent does the heavy lifting: it understands Range requests and
@@ -285,7 +365,7 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 //
 // Cleaning the path after a leading "/" removes every "..", so the request
 // cannot climb out of the media folder. allowed then applies the same filter
-// as the index.
+// as the index, and symlinks are refused.
 func (s *server) media(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, "/m/")), "/")
 	if !allowed(rel) {
@@ -334,6 +414,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	s.load(env("HS_PROGRESS", filepath.Join(cfg, "progress.json")))
 	// There is deliberately no WriteTimeout: a film takes hours to play and
 	// the response must stay open for as long as the viewer keeps watching.
 	srv := &http.Server{

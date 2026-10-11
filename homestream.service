@@ -1,3 +1,5 @@
+# setup.sh installs a copy of this file with ExecStart pointing at the folder
+# the program really lives in.
 [Unit]
 Description=HomeStream media server
 

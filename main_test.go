@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// Which paths may be listed and served.
 func TestAllowed(t *testing.T) {
 	for rel, want := range map[string]bool{
 		"Films/300.mp4": true, "a/b.MP3": true, "a/b [x].opus": true,
@@ -25,6 +26,7 @@ func TestAllowed(t *testing.T) {
 	}
 }
 
+// Which client addresses count as "on the LAN".
 func TestIsLAN(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"192.168.188.7:1": true, "10.0.0.1:1": true, "127.0.0.1:1": true, "[::1]:1": true,
@@ -37,6 +39,8 @@ func TestIsLAN(t *testing.T) {
 	}
 }
 
+// testServer returns a server over a small library that holds one of each
+// case: playable files, a text file, a hidden folder, lost+found and symlinks.
 func testServer(t *testing.T) http.Handler {
 	// The media root is a subfolder, so that ../secret.mp4 is a real media file
 	// just outside it: the only thing keeping it private is the ".." handling.
@@ -55,6 +59,8 @@ func testServer(t *testing.T) http.Handler {
 	return s.routes()
 }
 
+// do sends one request from a LAN address and returns the answer. mod, if
+// given, can change the request first, for example to add the session cookie.
 func do(h http.Handler, method, target, body string, mod func(*http.Request)) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, target, strings.NewReader(body))
 	r.RemoteAddr = "192.168.1.5:1234"
@@ -66,6 +72,7 @@ func do(h http.Handler, method, target, body string, mod func(*http.Request)) *h
 	return w
 }
 
+// Session tokens: only an untouched, unexpired one is valid.
 func TestSession(t *testing.T) {
 	s, _ := newServer(t.TempDir(), "pw")
 	future := time.Now().Add(time.Hour).Unix()
@@ -84,6 +91,37 @@ func TestSession(t *testing.T) {
 	}
 }
 
+// Saved positions must survive a restart, and a damaged file must not stop
+// the server from starting.
+func TestProgressFile(t *testing.T) {
+	root, file := t.TempDir(), filepath.Join(t.TempDir(), "progress.json")
+	start := func() (http.Handler, func(*http.Request)) {
+		s, _ := newServer(root, "pw")
+		s.load(file)
+		h := s.routes()
+		c := do(h, "POST", "/api/login", "pw", nil).Result().Cookies()[0]
+		return h, func(r *http.Request) { r.AddCookie(c) }
+	}
+	h, authed := start() // no file yet
+	do(h, "POST", "/api/progress", `{"p":"x/y.mp3","t":1234}`, authed)
+
+	h, authed = start() // "restart"
+	if body := do(h, "GET", "/api/progress", "", authed).Body.String(); !strings.Contains(body, `"x/y.mp3":{"t":1234,`) {
+		t.Errorf("after restart progress = %s, want x/y.mp3 at 1234", body)
+	}
+	if _, err := os.Stat(file + ".tmp"); err == nil {
+		t.Error("temporary file was left behind")
+	}
+
+	os.WriteFile(file, []byte("{half a fi"), 0o600)
+	h, authed = start()
+	if body := strings.TrimSpace(do(h, "GET", "/api/progress", "", authed).Body.String()); body != "{}" {
+		t.Errorf("progress from a damaged file = %s, want {}", body)
+	}
+}
+
+// The whole server through its HTTP routes, in the order a browser uses them:
+// refused without login, login, index, media, positions, logout.
 func TestFlow(t *testing.T) {
 	h := testServer(t)
 
@@ -134,6 +172,34 @@ func TestFlow(t *testing.T) {
 		if c := do(h, "GET", p, "", authed).Code; c == 200 {
 			t.Errorf("GET %s = 200, want a refusal", p)
 		}
+	}
+
+	// Playback positions: login required, save, read back, clear, bad input.
+	if c := do(h, "GET", "/api/progress", "", nil).Code; c != 401 {
+		t.Errorf("progress without cookie = %d, want 401", c)
+	}
+	if c := do(h, "POST", "/api/progress", `{"p":"a/b.mp4","t":90}`, nil).Code; c != 401 {
+		t.Errorf("save progress without cookie = %d, want 401", c)
+	}
+	progress := func() map[string]pos {
+		m := map[string]pos{}
+		json.Unmarshal(do(h, "GET", "/api/progress", "", authed).Body.Bytes(), &m)
+		return m
+	}
+	if c := do(h, "POST", "/api/progress", `{"p":"a/b.mp4","t":90.5}`, authed).Code; c != 204 {
+		t.Errorf("save progress = %d, want 204", c)
+	}
+	if m := progress(); len(m) != 1 || m["a/b.mp4"].T != 90.5 || m["a/b.mp4"].At == 0 {
+		t.Errorf("progress = %+v, want a/b.mp4 at 90.5", m)
+	}
+	for _, body := range []string{`{"p":"a/c.txt","t":5}`, `{"p":".hid/d.mp4","t":5}`, `{"p":"../secret.mp4","t":5}`, `{"p":"/a/b.mp4","t":5}`, `{"p":"a/b.mp4","t":"x"}`, `{"t":5}`, `nonsense`} {
+		if c := do(h, "POST", "/api/progress", body, authed).Code; c != 400 {
+			t.Errorf("save progress %s = %d, want 400", body, c)
+		}
+	}
+	do(h, "POST", "/api/progress", `{"p":"a/b.mp4","t":0}`, authed)
+	if m := progress(); len(m) != 0 {
+		t.Errorf("progress after clearing = %+v, want empty", m)
 	}
 
 	out := do(h, "POST", "/api/logout", "", authed).Result().Cookies()
