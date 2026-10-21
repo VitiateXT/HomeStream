@@ -1,6 +1,6 @@
 // HomeStream is a tiny media streamer for the home network. It serves the
-// video and audio files found below one folder over HTTPS, behind a single
-// password. It uses only the Go standard library.
+// videos, music, PDFs and images found below one folder over HTTPS, behind a
+// single password. It uses only the Go standard library.
 //
 // Routes:
 //
@@ -56,11 +56,14 @@ var indexHTML []byte
 
 // types lists the file extensions that are served and their Content-Type.
 // Any other file (.txt, .part, ...) is invisible: it is neither listed nor
-// downloadable. Add an extension here to serve a new format.
+// downloadable. Add an extension here to serve a new format. SVG is left out
+// on purpose: an SVG can carry scripts, which would run as part of this site.
 var types = map[string]string{
 	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
 	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac",
 	".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+	".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
+	".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
 }
 
 // sessionTTL is how long a login stays valid.

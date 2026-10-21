@@ -10,6 +10,8 @@ no database and no transcoding.
 
 - Plays video (mp4, m4v, webm) and audio (mp3, m4a, flac, ogg, opus, wav)
   straight from a folder.
+- Opens PDFs in the browser's own viewer (in a new tab) and shows images
+  (png, jpg, gif, webp).
 - Browse folders or search the whole library.
 - Seeking works, because files are sent with HTTP Range support.
 - Remembers where you stopped, for every file and across all your devices.
@@ -170,6 +172,9 @@ delete `progress.json` and start it again.
 - No transcoding. Files in formats your device cannot decode (for example AV1
   or 10-bit H.264 on older devices) will not play.
 - No posters, descriptions or subtitles.
+- The page you were reading in a PDF is not remembered, and there are no
+  thumbnails. SVG and HEIC images are not shown: SVG can carry scripts, and
+  only Safari can display HEIC.
 - Playback positions are shared, not per device: the device that saved last
   wins. A position is saved every 10 seconds and when you pause, seek or leave
   the page. The first and last 30 seconds of a file count as "not started" and

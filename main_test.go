@@ -19,6 +19,7 @@ func TestAllowed(t *testing.T) {
 		"a/b.txt": false, "a/b.mp4.part": false, ".Trash-1000/x.mp4": false,
 		"a/.hid/x.mp4": false, "lost+found/x.mp3": false, "": false, "a//b.mp4": false,
 		"a/...title.mp4": true, "a/._junk.mp4": false, "../x.mp4": false,
+		"Books/a.pdf": true, "p/x.JPG": true, "p/x.webp": true, "p/x.svg": false, "p/x.heic": false,
 	} {
 		if got := allowed(rel); got != want {
 			t.Errorf("allowed(%q) = %v, want %v", rel, got, want)
@@ -40,12 +41,13 @@ func TestIsLAN(t *testing.T) {
 }
 
 // testServer returns a server over a small library that holds one of each
-// case: playable files, a text file, a hidden folder, lost+found and symlinks.
+// case: playable files, a PDF, a text file, a hidden folder, lost+found and
+// symlinks.
 func testServer(t *testing.T) http.Handler {
 	// The media root is a subfolder, so that ../secret.mp4 is a real media file
 	// just outside it: the only thing keeping it private is the ".." handling.
 	root := filepath.Join(t.TempDir(), "lib")
-	for _, p := range []string{"a/b.mp4", "a/c.txt", ".hid/d.mp4", "lost+found/e.mp3", "f.MP3", "../secret.mp4"} {
+	for _, p := range []string{"a/b.mp4", "a/c.txt", "a/d.pdf", ".hid/d.mp4", "lost+found/e.mp3", "f.MP3", "../secret.mp4"} {
 		os.MkdirAll(filepath.Join(root, filepath.Dir(p)), 0o755)
 		os.WriteFile(filepath.Join(root, p), []byte("0123456789"), 0o644)
 	}
@@ -153,8 +155,8 @@ func TestFlow(t *testing.T) {
 	if err := json.Unmarshal(idx.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].P != "a/b.mp4" || got[1].P != "f.MP3" || got[0].S != 10 {
-		t.Errorf("index = %+v, want [a/b.mp4 f.MP3]", got)
+	if len(got) != 3 || got[0].P != "a/b.mp4" || got[1].P != "a/d.pdf" || got[2].P != "f.MP3" || got[0].S != 10 {
+		t.Errorf("index = %+v, want [a/b.mp4 a/d.pdf f.MP3]", got)
 	}
 
 	if w := do(h, "GET", "/m/a/b.mp4", "", authed); w.Code != 200 || w.Header().Get("Content-Type") != "video/mp4" {
@@ -163,6 +165,10 @@ func TestFlow(t *testing.T) {
 	w := do(h, "GET", "/m/a/b.mp4", "", func(r *http.Request) { authed(r); r.Header.Set("Range", "bytes=2-4") })
 	if w.Code != 206 || w.Header().Get("Content-Range") != "bytes 2-4/10" || w.Body.String() != "234" {
 		t.Errorf("range = %d %q %q", w.Code, w.Header().Get("Content-Range"), w.Body.String())
+	}
+	w = do(h, "GET", "/m/a/d.pdf", "", func(r *http.Request) { authed(r); r.Header.Set("Range", "bytes=0-3") })
+	if w.Code != 206 || w.Header().Get("Content-Type") != "application/pdf" {
+		t.Errorf("pdf range = %d %q", w.Code, w.Header().Get("Content-Type"))
 	}
 
 	for _, p := range []string{

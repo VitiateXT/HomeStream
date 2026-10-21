@@ -39,6 +39,7 @@ a{color:var(--acc);text-decoration:none}
 /* Player and its caption */
 video,audio{width:100%;margin-top:8px}
 video{max-height:55vh;background:#000}
+#player img{display:block;max-width:100%;max-height:80vh;margin:8px auto 0}
 #cap{margin:4px 0 8px;color:var(--dim);font-size:14px}
 
 /* File and folder list: name on the left, a small note on the right. */
@@ -80,6 +81,8 @@ li.h{padding:12px 0 0;color:var(--dim);font-size:14px}
     bookmarks work.
   - Playing a file just points a <video> or <audio> element at /m/<path>. The
     browser does the buffering and seeking itself with HTTP Range requests.
+    An image is shown with an <img> in the same place. A PDF opens in the
+    browser's own viewer in a new tab.
   - Playback positions live on the server (/api/progress) and are shared by all
     devices. A player reports its position while it plays, and asks for the
     latest one whenever playback starts. The last device to save wins.
@@ -155,18 +158,30 @@ function row(href, text, small, onclick) {
   return li;
 }
 
-// Start playing file f at the top of the page, from its saved position. Video
-// files get a <video>, everything else an <audio>. playsInline stops iPhones
-// from forcing fullscreen. Starting from a tap or click is what allows
-// autoplay, so the player is created at once and the position is fetched
-// alongside.
+// Open file f. A PDF opens in the browser's own viewer in a new tab and
+// leaves the player alone. Anything else replaces the player at the top of the
+// page: an image is simply shown, audio and video play from the saved
+// position. Video files get a <video>, other media an <audio>. playsInline
+// stops iPhones from forcing fullscreen. Starting from a tap or click is what
+// allows autoplay and the new tab, so everything happens at once and the
+// position is fetched alongside.
 function play(f) {
+  const url = '/m/' + enc(f.p);
+  if (/\.pdf$/i.test(f.p)) { window.open(url); return; }
   save(); // remember where the file that is being replaced stopped
-  const el = document.createElement(/\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
-  el.controls = el.autoplay = el.playsInline = true;
+  const img = /\.(png|jpe?g|gif|webp)$/i.test(f.p);
+  const el = document.createElement(img ? 'img' : /\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
   // If the file fails to load because the login expired (the server was
   // restarted), reloading the list brings the login form back.
   el.onerror = load;
+  el.src = url;
+  const cap = document.createElement('p');
+  cap.id = 'cap'; cap.textContent = document.title = title(f.p);
+  $('#player').replaceChildren(el, cap);
+  scrollTo(0, 0);
+  // An image has no position, so there is nothing to save or resume.
+  if (img) { save = () => {}; return; }
+  el.controls = el.autoplay = el.playsInline = true;
 
   // save() reports the position to the server. The first and last 30 seconds
   // count as "not started" and "finished" and send 0, which clears the entry.
@@ -202,11 +217,6 @@ function play(f) {
   el.onpause = el.onseeked = el.onended = save;
   // While playing, save every 10 seconds.
   el.ontimeupdate = () => { if (Date.now() - last > 10000) save(); };
-  el.src = '/m/' + enc(f.p);
-  const cap = document.createElement('p');
-  cap.id = 'cap'; cap.textContent = document.title = title(f.p);
-  $('#player').replaceChildren(el, cap);
-  scrollTo(0, 0);
 }
 
 // Redraw breadcrumbs and the list. With text in the search box it shows
