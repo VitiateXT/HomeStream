@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -170,6 +172,23 @@ func TestFlow(t *testing.T) {
 	if c := do(h, "GET", "/", "", func(r *http.Request) { r.RemoteAddr = "8.8.8.8:1" }).Code; c != 403 {
 		t.Errorf("public IP = %d, want 403", c)
 	}
+	// POSTs marked by the browser as coming from another website or another
+	// app on this PC are refused, even with the right password. HomeStream's
+	// own page and tools without these headers pass.
+	for _, tc := range []struct {
+		hdr, val string
+		want     int
+	}{
+		{"Sec-Fetch-Site", "cross-site", 403}, {"Sec-Fetch-Site", "same-site", 403}, {"Origin", "https://evil.example", 403},
+		{"Origin", "null", 403}, {"Sec-Fetch-Site", "same-origin", 200}, {"Origin", "https://example.com", 200}, {"", "", 200},
+	} {
+		if c := do(h, "POST", "/api/login", "pw", func(r *http.Request) { r.Header.Set(tc.hdr, tc.val) }).Code; c != tc.want {
+			t.Errorf("login with %s %q = %d, want %d", tc.hdr, tc.val, c, tc.want)
+		}
+	}
+	if c := do(h, "POST", "/api/login", "", func(r *http.Request) { r.Body = io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF)) }).Code; c != 400 {
+		t.Errorf("login with a broken body = %d, want 400", c)
+	}
 
 	login := do(h, "POST", "/api/login", "pw", nil)
 	cs := login.Result().Cookies()
@@ -222,6 +241,9 @@ func TestFlow(t *testing.T) {
 		m := map[string]pos{}
 		json.Unmarshal(do(h, "GET", "/api/progress", "", authed).Body.Bytes(), &m)
 		return m
+	}
+	if c := do(h, "POST", "/api/progress", `{"p":"a/b.mp4","t":90.5}`, func(r *http.Request) { authed(r); r.Header.Set("Sec-Fetch-Site", "same-site") }).Code; c != 403 {
+		t.Errorf("save progress from another app on this PC = %d, want 403", c)
 	}
 	if c := do(h, "POST", "/api/progress", `{"p":"a/b.mp4","t":90.5}`, authed).Code; c != 204 {
 		t.Errorf("save progress = %d, want 204", c)

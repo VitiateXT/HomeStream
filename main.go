@@ -203,9 +203,29 @@ func isLAN(remote string) bool {
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
+// sameOrigin reports whether a request was made by HomeStream's own page.
+// Browsers mark requests that another website or another web app on this PC
+// makes on the visitor's behalf: with Sec-Fetch-Site, or in older browsers
+// with Origin. Requests from tools such as curl carry neither and pass; they
+// do not run in the visitor's logged-in browser.
+func sameOrigin(r *http.Request) bool {
+	if s := r.Header.Get("Sec-Fetch-Site"); s != "" {
+		return s == "same-origin"
+	}
+	o := r.Header.Get("Origin")
+	return o == "" || o == "https://"+r.Host
+}
+
 // guard is the outermost handler. It rejects clients that are not on the LAN,
 // as a second line of defense behind the firewall, and tells browsers not to
 // guess content types.
+//
+// Every POST (login, logout, saving a position) must come from HomeStream's
+// own page. Otherwise a website the visitor opens could use their browser,
+// which is on the LAN, to guess the password (a wrong one takes a second, the
+// right one does not) or to act with their login. Its body must also arrive
+// within 10 seconds, so a client cannot hold a connection open forever by
+// sending it slowly.
 func guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isLAN(r.RemoteAddr) {
@@ -213,6 +233,13 @@ func guard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.Method == http.MethodPost {
+			if !sameOrigin(r) {
+				http.Error(w, "cross-site request refused", http.StatusForbidden)
+				return
+			}
+			http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -259,13 +286,21 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 // fixed-length values and takes the same time for any input. loginMu is held
 // while sleeping after a wrong password, which means failed attempts are
 // handled one at a time. A correct login can therefore be delayed for a moment
-// while wrong guesses are queued; that is the price of the rate limit.
+// while wrong guesses are queued; that is the price of the rate limit. A body
+// that does not arrive in full is refused at once instead of joining the
+// queue. Wrong passwords are logged with the client's address, at most one a
+// second because of the lock.
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	pw, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
+	pw, err := io.ReadAll(io.LimitReader(r.Body, 1024))
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	h := sha256.Sum256(pw)
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if subtle.ConstantTimeCompare(h[:], s.pwHash[:]) != 1 {
+		log.Printf("wrong password from %s", r.RemoteAddr)
 		time.Sleep(s.delay)
 		http.Error(w, "wrong password", http.StatusUnauthorized)
 		return

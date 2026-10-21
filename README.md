@@ -155,18 +155,31 @@ delete `progress.json` and start it again.
 
 - LAN only, in three layers: the firewall rule, a check in the server that
   refuses any client without a private (LAN) address, and no port forwarding
-  on the router.
+  on the router. Some routers make forwarded connections look local, so never
+  forward the port.
 - Everything is encrypted with TLS (HTTPS).
 - One shared password, no user accounts. A wrong password is delayed by one
-  second and attempts are handled one at a time, so guessing is slow.
+  second and attempts are handled one at a time, so guessing is slow; it is
+  logged with the device's address (`journalctl --user -u homestream`). A
+  device on your network can still try 86,400 passwords a day, so use a long
+  one.
+- Logging in, saving a position and signing out only work from HomeStream's
+  own page. The server refuses them when the browser marks them as sent by
+  another website or another web app on this PC, so a page you visit cannot
+  guess the password through your browser or act with your login.
+- Requests that arrive unfinished or very slowly are dropped after 10 seconds.
 - A login lasts 30 days and is kept in a signed cookie. "Sign out" removes it
-  from that browser. Restarting the server logs everyone out.
+  from that browser. Restarting the server logs everyone out. Browsers send
+  this cookie to every web app on this PC's address, whatever the port, so
+  only run web apps there that you trust.
 - Only the file types listed above are served. Hidden files and folders
   (names starting with a dot, except titles starting with `...`) and
   `lost+found` are never listed or served, and paths cannot climb out of the
   media folder.
 - The password sits in plain text in the env file, which is readable only by
   you. This is meant for a trusted home network, not for the internet.
+- Keep mkcert's `rootCA-key.pem` private. With it, anyone can make a
+  certificate for any website that your devices will trust.
 
 ## Limits
 
@@ -194,6 +207,6 @@ go test ./...
 |-----------------------|------------------------------------------------------|
 | `main.go`             | The whole server                                     |
 | `index.html`          | The web page, built into the binary                  |
-| `main_test.go`        | Tests for login, file access, positions, LAN check   |
+| `main_test.go`        | Tests for login, files, positions, LAN, cross-site   |
 | `homestream.service`  | systemd user service                                 |
 | `setup.sh`            | First-time setup on a new PC                         |
