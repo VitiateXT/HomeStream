@@ -169,6 +169,7 @@ function play(f) {
   const url = '/m/' + enc(f.p);
   if (/\.pdf$/i.test(f.p)) { window.open(url); return; }
   save(); // remember where the file that is being replaced stopped
+  // These extension checks must match the types list in main.go.
   const img = /\.(png|jpe?g|gif|webp)$/i.test(f.p);
   const el = document.createElement(img ? 'img' : /\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
   // If the file fails to load because the login expired (the server was
@@ -266,9 +267,10 @@ function render() {
   $('#list').replaceChildren(...rows);
 }
 
-// Sign out: the server deletes the session cookie. Reloading the page then
-// drops the file list and the player and shows the login form again.
-$('#out').onclick = async () => { await fetch('/api/logout', {method: 'POST'}); location.reload(); };
+// Sign out: save the position while still logged in, then the server deletes
+// the session cookie. Reloading the page drops the file list and the player
+// and shows the login form again.
+$('#out').onclick = async () => { save(); await fetch('/api/logout', {method: 'POST'}); location.reload(); };
 
 // Leaving the page (other tab, locked phone, closing) saves the position.
 // Coming back fetches what other devices saved meanwhile.

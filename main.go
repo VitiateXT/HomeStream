@@ -7,10 +7,10 @@
 //	GET  /              the web page (index.html), public
 //	POST /api/login     checks the password and sets the session cookie
 //	POST /api/logout    deletes the session cookie
-//	GET  /api/index     JSON list of all playable files, login required
+//	GET  /api/index     JSON list of all servable files, login required
 //	GET  /api/progress  saved playback positions, login required
 //	POST /api/progress  saves the position of one file, login required
-//	GET  /m/<path>      one media file with Range support (seeking), login required
+//	GET  /m/<path>      one file with Range support (seeking), login required
 //
 // Configuration is read from environment variables:
 //
@@ -56,8 +56,10 @@ var indexHTML []byte
 
 // types lists the file extensions that are served and their Content-Type.
 // Any other file (.txt, .part, ...) is invisible: it is neither listed nor
-// downloadable. Add an extension here to serve a new format. SVG is left out
-// on purpose: an SVG can carry scripts, which would run as part of this site.
+// downloadable. To serve a new format, add it here and to the extension
+// checks in play() in index.html, which decide how a file is shown. SVG is
+// left out on purpose: an SVG can carry scripts, which would run as part of
+// this site.
 var types = map[string]string{
 	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
 	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac",
@@ -314,13 +316,16 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// progress answers with every saved playback position as JSON.
+// progress answers with every saved playback position as JSON. The lock is
+// released before sending, so a device that stalls while downloading cannot
+// hold up saving for everyone else.
 func (s *server) progress(w http.ResponseWriter, r *http.Request) {
 	s.progMu.Lock()
-	defer s.progMu.Unlock()
+	b, _ := json.Marshal(s.prog)
+	s.progMu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(s.prog)
+	w.Write(b)
 }
 
 // saveProgress stores the position sent as {"p": path, "t": seconds}. A t of

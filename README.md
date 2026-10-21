@@ -2,9 +2,9 @@
 
 A very small, self-hosted media streamer for your home network.
 
-Point it at a folder of videos and music, log in with a password from any
-browser on your LAN, and play. It is one small program with no dependencies,
-no database and no transcoding.
+Point it at a folder of videos, music, books and pictures, log in with a
+password from any browser on your LAN, and play. It is one small program with
+no dependencies, no database and no transcoding.
 
 ## Features
 
@@ -27,7 +27,8 @@ H.264 video with AAC audio (the usual mp4) plays almost everywhere.
 
 The server lists the library as one JSON file, and the web page builds the
 folders and the search from that list. Playing a file points a standard
-`<video>` or `<audio>` element at the server. Playback positions are kept in
+`<video>` or `<audio>` element at the server; an image is shown with `<img>`,
+and a PDF opens in the browser's own viewer. Playback positions are kept in
 one small JSON file on the server.
 
 ## Requirements
@@ -49,7 +50,7 @@ On a new PC, run the setup script from this folder:
 
 It builds the program, creates the certificate, asks for a password and your
 media folder, installs the service so it starts at boot, and offers to add the
-firewall rule. It then prints the address to open. Two steps use sudo and say
+firewall rule for the default port 8443. It then prints the address to open. Two steps use sudo and say
 so first: mkcert adding its certificate authority to this PC, and the firewall
 rule.
 
@@ -173,8 +174,8 @@ delete `progress.json` and start it again.
   or 10-bit H.264 on older devices) will not play.
 - No posters, descriptions or subtitles.
 - The page you were reading in a PDF is not remembered, and there are no
-  thumbnails. SVG and HEIC images are not shown: SVG can carry scripts, and
-  only Safari can display HEIC.
+  thumbnails. SVG and HEIC/HEIF images are not shown: SVG can carry scripts,
+  and only Safari can display HEIC and HEIF.
 - Playback positions are shared, not per device: the device that saved last
   wins. A position is saved every 10 seconds and when you pause, seek or leave
   the page. The first and last 30 seconds of a file count as "not started" and

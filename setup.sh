@@ -71,7 +71,7 @@ sed "s|^ExecStart=.*|ExecStart=\"$repo/homestream\"|" homestream.service > "$HOM
 systemctl --user daemon-reload
 systemctl --user enable homestream
 systemctl --user restart homestream
-loginctl enable-linger "$USER" || echo "Could not turn on start-at-boot. Run: sudo loginctl enable-linger $USER"
+loginctl enable-linger "$(id -un)" || echo "Could not turn on start-at-boot. Run: sudo loginctl enable-linger $(id -un)"
 sleep 1
 systemctl --user is-active --quiet homestream || die "the service did not start. See: journalctl --user -u homestream -n 20"
 
