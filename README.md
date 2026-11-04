@@ -14,6 +14,8 @@ no dependencies, no database and no transcoding.
   (png, jpg, gif, webp).
 - Browse folders or search the whole library.
 - Seeking works, because files are sent with HTTP Range support.
+- Video and audio start at half volume, which you can then turn up or down.
+  On iPhone and iPad the volume follows the device's buttons instead.
 - Remembers where you stopped, for every file and across all your devices.
   The start page lists what you played last under "Continue".
 - One password, encrypted with HTTPS, reachable from the local network only.

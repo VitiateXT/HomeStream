@@ -183,6 +183,9 @@ function play(f) {
   // An image has no position, so there is nothing to save or resume.
   if (img) { save = () => {}; return; }
   el.controls = el.autoplay = el.playsInline = true;
+  // Every file starts at half volume; the player's own control changes it.
+  // iPhones and iPads ignore this: there the volume follows the device buttons.
+  el.volume = 0.5;
 
   // save() reports the position to the server. The first and last 30 seconds
   // count as "not started" and "finished" and send 0, which clears the entry.
