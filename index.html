@@ -18,7 +18,9 @@
 *{box-sizing:border-box}
 /* Make the hidden attribute win over display:flex and friends below. */
 [hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif}
+/* overflow-anchor:none: when the player appears it pushes the list down, so
+   the rows you were looking at end up just below it, in every browser. */
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;overflow-anchor:none}
 
 /* Page width and the 16px side gutter that keeps content off the screen edge on phones. */
 main,form{max-width:900px;margin:0 auto;padding:0 16px}
@@ -32,15 +34,20 @@ button{background:var(--acc);color:#000;border:0}
 
 /* Top row (search box and a quiet sign-out button), then the breadcrumb path */
 #top{display:flex;gap:8px;margin-top:12px}
-#out{background:none;color:var(--dim);border:1px solid var(--line);white-space:nowrap}
+#out,#cap button{background:none;color:var(--dim);border:1px solid var(--line);white-space:nowrap}
 nav{margin:8px 0;color:var(--dim);overflow-wrap:anywhere}
 a{color:var(--acc);text-decoration:none}
 
-/* Player and its caption */
+/* Player and its caption (title and a Close button). The player stays at the
+   top of the screen while the list scrolls under it; empty, it takes no space.
+   flow-root keeps the margins inside, so no list row shows through above or
+   below it. */
+#player{position:sticky;top:0;background:var(--bg);display:flow-root}
 video,audio{width:100%;margin-top:8px}
 video{max-height:55vh;background:#000}
-#player img{display:block;max-width:100%;max-height:80vh;margin:8px auto 0}
-#cap{margin:4px 0 8px;color:var(--dim);font-size:14px}
+#player img{display:block;max-width:100%;max-height:55vh;margin:8px auto 0}
+#cap{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:4px 0 8px;color:var(--dim);font-size:14px;overflow-wrap:anywhere}
+#cap button{padding:4px 10px}
 
 /* File and folder list: name on the left, a small note on the right. */
 ul{list-style:none;margin:0;padding:0}
@@ -159,12 +166,12 @@ function row(href, text, small, onclick) {
 }
 
 // Open file f. A PDF opens in the browser's own viewer in a new tab and
-// leaves the player alone. Anything else replaces the player at the top of the
-// page: an image is simply shown, audio and video play from the saved
-// position. Video files get a <video>, other media an <audio>. playsInline
-// stops iPhones from forcing fullscreen. Starting from a tap or click is what
-// allows autoplay and the new tab, so everything happens at once and the
-// position is fetched alongside.
+// leaves the player alone. Anything else replaces the player, which stays at
+// the top of the screen while the list keeps its place: an image is simply
+// shown, audio and video play from the saved position. Video files get a
+// <video>, other media an <audio>. playsInline stops iPhones from forcing
+// fullscreen. Starting from a tap or click is what allows autoplay and the new
+// tab, so everything happens at once and the position is fetched alongside.
 function play(f) {
   const url = '/m/' + enc(f.p);
   if (/\.pdf$/i.test(f.p)) { window.open(url); return; }
@@ -176,10 +183,13 @@ function play(f) {
   // restarted), reloading the list brings the login form back.
   el.onerror = load;
   el.src = url;
-  const cap = document.createElement('p');
+  const cap = document.createElement('p'), x = document.createElement('button');
   cap.id = 'cap'; cap.textContent = document.title = title(f.p);
+  // Close saves the position and removes the player, which stops it.
+  x.textContent = 'Close';
+  x.onclick = () => { save(); save = () => {}; $('#player').replaceChildren(); document.title = 'HomeStream'; };
+  cap.append(x);
   $('#player').replaceChildren(el, cap);
-  scrollTo(0, 0);
   // An image has no position, so there is nothing to save or resume.
   if (img) { save = () => {}; return; }
   el.controls = el.autoplay = el.playsInline = true;

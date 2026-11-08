@@ -14,6 +14,8 @@ no dependencies, no database and no transcoding.
   (png, jpg, gif, webp).
 - Browse folders, and search the folder you are in (on the start page, the
   whole library).
+- The player stays at the top of the screen while you scroll the list, and
+  Close removes it.
 - Seeking works, because files are sent with HTTP Range support.
 - Video and audio start at half volume, which you can then turn up or down.
   On iPhone and iPad the volume follows the device's buttons instead.
@@ -33,6 +35,20 @@ folders and the search from that list. Playing a file points a standard
 `<video>` or `<audio>` element at the server; an image is shown with `<img>`,
 and a PDF opens in the browser's own viewer. Playback positions are kept in
 one small JSON file on the server.
+
+A big MP4 file starts quickly only if its index (the part that says where
+every frame is) sits at the start of the file and is small. Otherwise the
+browser has to download all of it before the first frame; with many audio
+tracks it can reach 100 MB. Downloads from yt-dlp are fine. In HandBrake, tick
+"Web Optimized" and pick only the audio tracks you need. An existing file can
+be fixed in a minute or two, without re-encoding:
+
+```bash
+ffmpeg -i in.mp4 -map 0:v:0 -map 0:a:0 -c copy -movflags +faststart out.mp4
+```
+
+This keeps the video and the first audio track. Add `-map 0:a:N` for each
+further audio track to keep, counting from 0.
 
 ## Requirements
 
@@ -189,6 +205,8 @@ delete `progress.json` and start it again.
 - No transcoding. Files in formats your device cannot decode (for example AV1
   or 10-bit H.264 on older devices) will not play.
 - No posters, descriptions or subtitles.
+- Only Safari can switch between a video's audio languages. Other browsers
+  always play the first audio track.
 - The page you were reading in a PDF is not remembered, and there are no
   thumbnails. SVG and HEIC/HEIF images are not shown: SVG can carry scripts,
   and only Safari can display HEIC and HEIF.
