@@ -224,31 +224,36 @@ function play(f) {
 }
 
 // Redraw breadcrumbs and the list. With text in the search box it shows
-// matches from the whole library; otherwise it shows the current folder.
+// matches from the current folder and everything below it; otherwise it shows
+// the current folder.
 function render() {
   // Current folder from the URL hash ("#/Films" -> "Films"). A malformed hash
-  // falls back to the top level.
+  // falls back to the top level. pre is the path prefix of everything in it.
   let dir = '';
   try { dir = decodeURIComponent(location.hash.slice(2)); } catch {}
+  const pre = dir ? dir + '/' : '';
   const words = $('#q').value.toLowerCase().split(/\s+/).filter(Boolean);
 
   // Breadcrumbs: Home / Folder / Subfolder, each part a link to that folder.
   const parts = dir ? dir.split('/') : [];
   $('#crumbs').replaceChildren(link('#/', 'Home'), ...parts.flatMap((p, i) =>
     [' / ', link('#/' + encodeURIComponent(parts.slice(0, i + 1).join('/')), p)]));
+  $('#q').placeholder = dir ? `Search in ${parts.at(-1)}…` : 'Search everything…';
 
   let rows;
   if (words.length) {
-    // Search: a file matches if its full path contains every typed word. The
-    // note on the right is the folder it lives in.
-    const hits = files.filter(f => words.every(w => f.p.toLowerCase().includes(w)));
+    // Search: a file in or below the current folder matches if its path from
+    // there contains every typed word. Subfolder names count; the current
+    // folder's own name does not, or it would match everything. The note on
+    // the right is the folder the file lives in.
+    const hits = files.filter(f => f.p.startsWith(pre) && words.every(w => f.p.slice(pre.length).toLowerCase().includes(w)));
     rows = hits.slice(0, MAX).map(f => row('#', title(f.p), f.p.split('/').slice(-2, -1)[0] || '', () => play(f)));
     // The no-op click handler keeps this note from acting as a link to Home.
     if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, '', () => {}));
   } else {
     // Browse: split everything below the current folder into direct files and
     // direct subfolders (with a count of the files inside each).
-    const pre = dir ? dir + '/' : '', dirs = new Map(), here = [];
+    const dirs = new Map(), here = [];
     for (const f of files) {
       if (!f.p.startsWith(pre)) continue;
       const rest = f.p.slice(pre.length), i = rest.indexOf('/');

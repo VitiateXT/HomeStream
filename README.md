@@ -12,7 +12,8 @@ no dependencies, no database and no transcoding.
   straight from a folder.
 - Opens PDFs in the browser's own viewer (in a new tab) and shows images
   (png, jpg, gif, webp).
-- Browse folders or search the whole library.
+- Browse folders, and search the folder you are in (on the start page, the
+  whole library).
 - Seeking works, because files are sent with HTTP Range support.
 - Video and audio start at half volume, which you can then turn up or down.
   On iPhone and iPad the volume follows the device's buttons instead.
