@@ -4,7 +4,8 @@ A very small, self-hosted media streamer for your home network.
 
 Point it at a folder of videos, music, books and pictures, log in with a
 password from any browser on your LAN, and play. It is one small program with
-no dependencies, no database and no transcoding.
+no database and no transcoding. If ffmpeg is installed, it also makes
+thumbnails for your videos.
 
 ## Features
 
@@ -16,7 +17,8 @@ no dependencies, no database and no transcoding.
   whole library).
 - Laid out like a video site: files are cards with a colored tile that shows
   the kind of file and its size or saved position, and folders have a round
-  letter badge. While something plays, wide screens show the list beside the
+  letter badge. Videos show a frame from 10% into the video instead (needs
+  ffmpeg). While something plays, wide screens show the list beside the
   player; on phones the player stays at the top while you scroll. Close
   removes it.
 - Seeking works, because files are sent with HTTP Range support.
@@ -39,6 +41,11 @@ folders and the search from that list. Playing a file points a standard
 and a PDF opens in the browser's own viewer. Playback positions are kept in
 one small JSON file on the server.
 
+A video's thumbnail is made by ffmpeg the first time its card scrolls into
+view, at most eight at a time, and kept in `~/.cache/homestream/thumbs` (about
+13 KB each). The first visit to a big folder takes a few seconds to fill in;
+after that thumbnails appear at once. A changed video gets a new one.
+
 A big MP4 file starts quickly only if its index (the part that says where
 every frame is) sits at the start of the file and is small. Otherwise the
 browser has to download all of it before the first frame; with many audio
@@ -59,8 +66,9 @@ further audio track to keep, counting from 0.
 - Go 1.22 or newer, to build it.
 - [mkcert](https://github.com/FiloSottile/mkcert), to create the HTTPS
   certificate. Any other TLS certificate and key also work.
+- Optional: ffmpeg, for video thumbnails. Without it videos get a colored tile.
 
-On Debian or Ubuntu: `sudo apt install golang-go mkcert libnss3-tools`.
+On Debian or Ubuntu: `sudo apt install golang-go mkcert libnss3-tools ffmpeg`.
 
 ## Setup
 
@@ -171,7 +179,8 @@ Set these as environment variables. With the service, put them in
 To change the password, edit the env file and run
 `systemctl --user restart homestream`. After rebuilding the binary, restart the
 service the same way. To forget all playback positions, stop the service,
-delete `progress.json` and start it again.
+delete `progress.json` and start it again. Thumbnails can be deleted at any
+time (`rm -r ~/.cache/homestream`); they are made again when needed.
 
 ## Security
 
@@ -197,7 +206,7 @@ delete `progress.json` and start it again.
 - Only the file types listed above are served. Hidden files and folders
   (names starting with a dot, except titles starting with `...`) and
   `lost+found` are never listed or served, and paths cannot climb out of the
-  media folder.
+  media folder. Thumbnails follow the same rules.
 - The password sits in plain text in the env file, which is readable only by
   you. This is meant for a trusted home network, not for the internet.
 - Keep mkcert's `rootCA-key.pem` private. With it, anyone can make a
@@ -207,7 +216,8 @@ delete `progress.json` and start it again.
 
 - No transcoding. Files in formats your device cannot decode (for example AV1
   or 10-bit H.264 on older devices) will not play.
-- No posters, descriptions or subtitles.
+- No posters, descriptions or subtitles. Thumbnails are a frame from the
+  video, and only videos get one.
 - Only Safari can switch between a video's audio languages. Other browsers
   always play the first audio track.
 - The page you were reading in a PDF is not remembered, and there are no
@@ -232,6 +242,6 @@ go test ./...
 |-----------------------|------------------------------------------------------|
 | `main.go`             | The whole server                                     |
 | `index.html`          | The web page, built into the binary                  |
-| `main_test.go`        | Tests for login, files, positions, LAN, cross-site   |
+| `main_test.go`        | Tests: login, files, thumbnails, positions, LAN, ... |
 | `homestream.service`  | systemd user service                                 |
 | `setup.sh`            | First-time setup on a new PC                         |

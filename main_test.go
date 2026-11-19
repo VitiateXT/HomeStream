@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -264,5 +266,44 @@ func TestFlow(t *testing.T) {
 	out := do(h, "POST", "/api/logout", "", authed).Result().Cookies()
 	if len(out) != 1 || out[0].Name != "hs" || out[0].Value != "" || out[0].MaxAge >= 0 {
 		t.Errorf("logout cookies = %+v, want one empty, expired hs cookie", out)
+	}
+}
+
+// Thumbnails: login required, the same refusals as for media, made once with
+// ffmpeg and then served from the cache. A broken video leaves nothing behind.
+func TestThumb(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "a/.hid"), 0o755)
+	for _, p := range []string{"a/broken.mp4", "a/song.mp3", "a/.hid/x.mp4"} {
+		os.WriteFile(filepath.Join(root, p), []byte("0123456789"), 0o644)
+	}
+	s, _ := newServer(root, "pw")
+	s.thumbs = t.TempDir()
+	h := s.routes()
+	c := do(h, "POST", "/api/login", "pw", nil).Result().Cookies()[0]
+	authed := func(r *http.Request) { r.AddCookie(c) }
+
+	if code := do(h, "GET", "/t/a/broken.mp4", "", nil).Code; code != 401 {
+		t.Errorf("thumbnail without cookie = %d, want 401", code)
+	}
+	for _, p := range []string{"/t/a/song.mp3", "/t/a/.hid/x.mp4", "/t/../x.mp4", "/t/%2e%2e/x.mp4", "/t/a/nope.mp4", "/t/a/broken.mp4"} {
+		if code := do(h, "GET", p, "", authed).Code; code == 200 {
+			t.Errorf("GET %s = 200, want a refusal", p)
+		}
+	}
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	if err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=d=2:s=320x240", "-pix_fmt", "yuv420p", filepath.Join(root, "a/v.mp4")).Run(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // made, then from the cache
+		w := do(h, "GET", "/t/a/v.mp4", "", authed)
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/jpeg" || !bytes.HasPrefix(w.Body.Bytes(), []byte{0xff, 0xd8}) {
+			t.Errorf("thumbnail %d = %d %q", i, w.Code, w.Header().Get("Content-Type"))
+		}
+	}
+	if m, _ := filepath.Glob(filepath.Join(s.thumbs, "*")); len(m) != 1 {
+		t.Errorf("cache holds %v, want just one thumbnail", m)
 	}
 }

@@ -1,6 +1,7 @@
 // HomeStream is a tiny media streamer for the home network. It serves the
 // videos, music, PDFs and images found below one folder over HTTPS, behind a
-// single password. It uses only the Go standard library.
+// single password. It uses only the Go standard library, plus ffmpeg (if
+// installed) to make video thumbnails.
 //
 // Routes:
 //
@@ -11,6 +12,7 @@
 //	GET  /api/progress  saved playback positions, login required
 //	POST /api/progress  saves the position of one file, login required
 //	GET  /m/<path>      one file with Range support (seeking), login required
+//	GET  /t/<path>      a small JPEG thumbnail of one video, login required
 //
 // Configuration is read from environment variables:
 //
@@ -20,9 +22,12 @@
 //	HS_CERT      TLS certificate     (default ~/.config/homestream/cert.pem)
 //	HS_KEY       TLS private key     (default ~/.config/homestream/key.pem)
 //	HS_PROGRESS  saved positions     (default ~/.config/homestream/progress.json)
+//
+// Thumbnails are kept in ~/.cache/homestream/thumbs.
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -32,6 +37,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -40,6 +46,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -67,6 +74,9 @@ var types = map[string]string{
 	".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
 	".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
 }
+
+// videos lists the extensions that get a thumbnail.
+var videos = map[string]bool{".mp4": true, ".m4v": true, ".webm": true}
 
 // sessionTTL is how long a login stays valid.
 const sessionTTL = 30 * 24 * time.Hour
@@ -109,6 +119,10 @@ type server struct {
 	progMu sync.Mutex
 	// store is the file prog is saved to. Empty means memory only.
 	store string
+	// thumbs is the folder thumbnails are cached in. Empty means none are made.
+	thumbs string
+	// busy limits how many thumbnails are made at the same time.
+	busy chan struct{}
 }
 
 // pos is the saved playback position of one file.
@@ -128,7 +142,7 @@ func newServer(root, password string) (*server, error) {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return nil, errors.New(root + " is not a directory")
 	}
-	s := &server{root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second, prog: map[string]pos{}}
+	s := &server{root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second, prog: map[string]pos{}, busy: make(chan struct{}, 8)}
 	_, err = rand.Read(s.secret)
 	return s, err
 }
@@ -163,6 +177,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/progress", s.auth(s.progress))
 	mux.HandleFunc("POST /api/progress", s.auth(s.saveProgress))
 	mux.HandleFunc("GET /m/{p...}", s.auth(s.media))
+	mux.HandleFunc("GET /t/{p...}", s.auth(s.thumb))
 	return guard(mux)
 }
 
@@ -399,27 +414,36 @@ func (s *server) saveProgress(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// resolve turns the part of a URL after /m/ or /t/ into a file in the media
+// folder: its path relative to the root and its full path. ok is false if it
+// may not be served.
+//
+// Cleaning the path after a leading "/" removes every "..", so the request
+// cannot climb out of the media folder. allowed then applies the same filter
+// as the index, and symlinks are refused: EvalSymlinks returns the path
+// unchanged unless a symlink is involved, and a link named x.mp4 could point
+// at any file outside the media folder.
+func (s *server) resolve(p string) (rel, full string, ok bool) {
+	rel = strings.TrimPrefix(path.Clean("/"+p), "/")
+	if !allowed(rel) {
+		return "", "", false
+	}
+	full = filepath.Join(s.root, filepath.FromSlash(rel))
+	if p, err := filepath.EvalSymlinks(full); err != nil || p != full {
+		return "", "", false
+	}
+	return rel, full, true
+}
+
 // media sends one file from the media folder.
 //
 // http.ServeContent does the heavy lifting: it understands Range requests and
 // answers them with 206 Partial Content, which is what lets a browser seek
 // inside a film without downloading it all, and it sets Content-Length and
 // Last-Modified. Files are never loaded into memory.
-//
-// Cleaning the path after a leading "/" removes every "..", so the request
-// cannot climb out of the media folder. allowed then applies the same filter
-// as the index, and symlinks are refused.
 func (s *server) media(w http.ResponseWriter, r *http.Request) {
-	rel := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, "/m/")), "/")
-	if !allowed(rel) {
-		http.NotFound(w, r)
-		return
-	}
-	// EvalSymlinks returns the path unchanged unless a symlink is involved.
-	// Refuse those, as the index does: a link named x.mp4 could point at any
-	// file outside the media folder.
-	full := filepath.Join(s.root, filepath.FromSlash(rel))
-	if p, err := filepath.EvalSymlinks(full); err != nil || p != full {
+	rel, full, ok := s.resolve(strings.TrimPrefix(r.URL.Path, "/m/"))
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -435,6 +459,73 @@ func (s *server) media(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeContent(w, r, rel, fi.ModTime(), f)
+}
+
+// thumb sends a small JPEG of the frame 10% into a video. It is made on first
+// request and then kept in the thumbs folder, named after the video's path,
+// size and modification time, so a changed video gets a new one. Anything
+// that goes wrong (no ffmpeg, a broken video) answers 404, and the page keeps
+// its colored tile instead.
+func (s *server) thumb(w http.ResponseWriter, r *http.Request) {
+	rel, full, ok := s.resolve(strings.TrimPrefix(r.URL.Path, "/t/"))
+	if !ok || s.thumbs == "" || !videos[strings.ToLower(path.Ext(rel))] {
+		http.NotFound(w, r)
+		return
+	}
+	fi, err := os.Stat(full)
+	if err != nil || !fi.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	key := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%d", rel, fi.Size(), fi.ModTime().UnixNano())))
+	jpg := filepath.Join(s.thumbs, hex.EncodeToString(key[:16])+".jpg")
+	if _, err := os.Stat(jpg); err != nil && !s.makeThumb(r.Context(), full, jpg) {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(jpg)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Cache-Control", "private, max-age=604800")
+	http.ServeContent(w, r, "thumb.jpg", fi.ModTime(), f)
+}
+
+// makeThumb runs ffmpeg to save one frame of video as jpg, 480 pixels wide.
+// At most cap(busy) run at once; a request whose page has moved on while it
+// waits is dropped. It writes a temporary file and renames it, so a cut-off
+// run never leaves half a thumbnail behind.
+func (s *server) makeThumb(ctx context.Context, video, jpg string) bool {
+	select {
+	case s.busy <- struct{}{}:
+		defer func() { <-s.busy }()
+	case <-ctx.Done():
+		return false
+	}
+	if _, err := os.Stat(jpg); err == nil {
+		return true // made by another request while this one waited
+	}
+	page := ctx
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	// The length, to pick a frame past any black opening. Unknown: the first.
+	out, _ := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video).Output()
+	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	tmp := jpg + ".tmp"
+	err := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-ss", strconv.FormatFloat(d/10, 'f', 2, 64), "-i", video,
+		"-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "5", "-f", "image2", "-y", tmp).Run()
+	if err == nil {
+		err = os.Rename(tmp, jpg)
+	}
+	if err != nil {
+		os.Remove(tmp)
+		if page.Err() == nil { // not when the page simply moved on
+			log.Printf("no thumbnail for %s: %v", video, err)
+		}
+	}
+	return err == nil
 }
 
 // env returns the environment variable key, or def if it is unset or empty.
@@ -458,6 +549,17 @@ func main() {
 		log.Fatal(err)
 	}
 	s.load(env("HS_PROGRESS", filepath.Join(cfg, "progress.json")))
+	// Thumbnails need ffmpeg. Without it, or without a cache folder, videos
+	// keep their colored tiles.
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		log.Print("ffmpeg not found, so videos get no thumbnails")
+	} else if c, err := os.UserCacheDir(); err == nil {
+		s.thumbs = filepath.Join(c, "homestream", "thumbs")
+		if err := os.MkdirAll(s.thumbs, 0o700); err != nil {
+			log.Print(err)
+			s.thumbs = ""
+		}
+	}
 	// There is deliberately no WriteTimeout: a film takes hours to play and
 	// the response must stay open for as long as the viewer keeps watching.
 	srv := &http.Server{

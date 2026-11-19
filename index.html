@@ -104,6 +104,8 @@ li.dir a{align-items:center}
 .audio::before{content:'\266A'}
 .pic::before{width:32%;aspect-ratio:3/2;background:#fff;clip-path:polygon(0 100%,30% 35%,50% 65%,68% 45%,100% 100%)}
 .pdf::before{content:'PDF';font-size:.6em;font-weight:700;letter-spacing:1px}
+/* A video's thumbnail covers its tile once it has loaded. */
+.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .tile b{position:absolute;right:6px;bottom:6px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.8);font-size:12px;font-weight:600}
 .tile b.at{background:var(--acc);color:#000}
 /* "Continue" heading, and the note under a long search. */
@@ -152,6 +154,7 @@ li.more .t span{color:var(--dim);font-weight:400}
     all computed in the browser from it.
   - The current folder lives in the URL hash (#/Films), so the back button and
     bookmarks work.
+  - A video's tile shows a thumbnail from /t/<path>, made by the server.
   - Playing a file just points a <video> or <audio> element at /m/<path>. The
     browser does the buffering and seeking itself with HTTP Range requests.
     An image is shown with an <img> in the same place. A PDF opens in the
@@ -255,14 +258,24 @@ function row(href, text, small, onclick, pic, cls) {
 function dirRow(path, name, n) {
   const av = el('div', 'av', [...name][0].toUpperCase());
   av.style.setProperty('--h', hue(name));
-  return row('#/' + encodeURIComponent(path), name, n + ' files', null, av, 'dir');
+  return row('#/' + encodeURIComponent(path), name, n + (n === 1 ? ' file' : ' files'), null, av, 'dir');
 }
 
 // A file: colored tile with its saved position or size, title, and details.
-// The tile's color is its folder's, shifted a little per file.
+// The tile's color is its folder's, shifted a little per file. A video also
+// gets a thumbnail from the server, loaded only when it scrolls near the
+// screen; the size in the address makes a replaced video fetch a new one. If
+// there is none (no ffmpeg on the server), the img removes itself.
 function fileRow(f, small) {
   const tile = el('div', 'tile ' + kind(f.p)), b = el('b', prog[f.p] ? 'at' : '', note(f));
   tile.style.setProperty('--h', hue(folder(f.p)) + hue(f.p) % 60);
+  if (kind(f.p) === 'video') {
+    const img = el('img');
+    img.loading = 'lazy'; img.alt = '';
+    img.onerror = () => img.remove();
+    img.src = '/t/' + enc(f.p) + '?s=' + f.s;
+    tile.append(img);
+  }
   tile.append(b);
   return row('#', title(f.p), small, a => play(f, a), tile);
 }
@@ -393,6 +406,9 @@ function render() {
       .map(p => files.find(f => f.p === p)).filter(Boolean).slice(0, 5);
     if (recent.length) rows.unshift(el('li', 'h', 'Continue'), ...recent.map(f => fileRow(f, folder(f.p))));
   }
+  // Clearing the old thumbnails' addresses cancels those still loading, so
+  // the server does not make thumbnails for a list that is gone (fast typing).
+  for (const img of $('#list').querySelectorAll('img')) img.removeAttribute('src');
   $('#list').replaceChildren(...rows);
 }
 

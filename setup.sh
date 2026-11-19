@@ -23,6 +23,7 @@ for tool in go mkcert; do
   command -v "$tool" >/dev/null || die "'$tool' is not installed. On Debian or Ubuntu: sudo apt install golang-go mkcert libnss3-tools"
 done
 command -v systemctl >/dev/null || die "systemd is needed to run HomeStream as a service"
+command -v ffmpeg >/dev/null || echo "Note: without ffmpeg, videos get no thumbnails. On Debian or Ubuntu: sudo apt install ffmpeg"
 
 say "Building"
 go build -trimpath -ldflags="-s -w" -o homestream
