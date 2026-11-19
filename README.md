@@ -246,6 +246,8 @@ go test ./...
 | `progress.go`         | Saved playback positions                             |
 | `thumbs.go`           | Video thumbnails                                     |
 | `index.html`          | The web page, built into the binary                  |
+| `logo.png`            | The logo and browser icon, built into the binary     |
+| `logo.aseprite`       | The logo's source, for the Aseprite pixel editor     |
 | `*_test.go`           | Tests, one file per part, plus the whole flow        |
 | `homestream.service`  | systemd user service                                 |
 | `setup.sh`            | First-time setup on a new PC                         |

@@ -6,6 +6,7 @@
 // Routes:
 //
 //	GET  /              the web page (index.html), public
+//	GET  /logo.png      the logo, also the browser and home screen icon, public
 //	POST /api/login     checks the password and sets the session cookie
 //	POST /api/logout    deletes the session cookie
 //	GET  /api/index     JSON list of all servable files, login required
@@ -54,6 +55,11 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
+// logoPNG is the logo, built in the same way. logo.aseprite is its source.
+//
+//go:embed logo.png
+var logoPNG []byte
+
 // server holds the state shared by all request handlers.
 type server struct {
 	// root is the media folder with symlinks resolved.
@@ -96,14 +102,19 @@ func newServer(root, password string) (*server, error) {
 	return s, err
 }
 
-// routes builds the request handler. Only the page, login and logout are
-// public; everything that exposes file names or content goes through auth.
+// routes builds the request handler. Only the page, the logo, login and
+// logout are public; everything that exposes file names or content goes through auth.
 // The whole thing is wrapped in guard, which enforces the LAN-only rule.
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
+	})
+	mux.HandleFunc("GET /logo.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=86400")
+		w.Write(logoPNG)
 	})
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", logout)

@@ -12,6 +12,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>HomeStream</title>
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>
 /* Styled roughly like the big video site around 2018: a light gray page
    under a white top bar, Roboto, square thumbnails, flat blue uppercase
@@ -54,8 +56,7 @@ form{max-width:440px;padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
 #top{display:flex;align-items:center;gap:16px;height:56px;margin-bottom:16px;
   border-image:linear-gradient(var(--card) calc(100% - 1px),var(--line) 0) fill 0//0 100vmax}
 #logo{display:flex;align-items:center;gap:6px;color:var(--fg);font-size:20px;letter-spacing:-.6px;white-space:nowrap}
-#logo i{width:28px;height:28px;border-radius:50%;background:var(--red);display:grid;place-items:center}
-#logo i::after{content:'';width:10px;height:12px;margin-left:3px;background:#fff;clip-path:polygon(0 0,100% 50%,0 100%)}
+#logo img{width:28px;height:28px}
 #q{max-width:640px;margin:0 auto;padding-right:76px;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23909090' stroke-width='2'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E") no-repeat right 23px center/18px,
     linear-gradient(to left,var(--btn) 64px,var(--inl) 64px 65px,var(--in) 65px)}
@@ -150,7 +151,7 @@ li.more .t span{color:var(--dim);font-weight:400}
 <!-- The library browser. Shown once the file list has loaded. -->
 <main id="app" hidden>
   <div id="top">
-    <a id="logo" href="#/"><i></i><b>HomeStream</b></a>
+    <a id="logo" href="#/"><img src="/logo.png" alt=""><b>HomeStream</b></a>
     <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
     <button id="out">Sign out</button>
   </div>

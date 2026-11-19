@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -92,7 +93,10 @@ func TestPage(t *testing.T) {
 	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("nosniff header missing")
 	}
-	for _, p := range []string{"/index.html", "/main.go", "/api/", "/m/", "/x"} {
+	if w := do(h, "GET", "/logo.png", "", nil); w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || !bytes.HasPrefix(w.Body.Bytes(), []byte("\x89PNG")) {
+		t.Errorf("logo = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+	for _, p := range []string{"/logo.aseprite", "/index.html", "/main.go", "/api/", "/m/", "/x"} {
 		if c := do(h, "GET", p, "", nil).Code; c != 404 && c != 401 {
 			t.Errorf("GET %s = %d, want 404 or 401", p, c)
 		}
