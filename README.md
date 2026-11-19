@@ -14,8 +14,11 @@ no dependencies, no database and no transcoding.
   (png, jpg, gif, webp).
 - Browse folders, and search the folder you are in (on the start page, the
   whole library).
-- The player stays at the top of the screen while you scroll the list, and
-  Close removes it.
+- Laid out like a video site: files are cards with a colored tile that shows
+  the kind of file and its size or saved position, and folders have a round
+  letter badge. While something plays, wide screens show the list beside the
+  player; on phones the player stays at the top while you scroll. Close
+  removes it.
 - Seeking works, because files are sent with HTTP Range support.
 - Video and audio start at half volume, which you can then turn up or down.
   On iPhone and iPad the volume follows the device's buttons instead.

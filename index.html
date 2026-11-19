@@ -13,49 +13,114 @@
 <meta name="color-scheme" content="dark">
 <title>HomeStream</title>
 <style>
-/* Colors in one place: background, text, dimmed text, divider lines, accent. */
-:root{--bg:#111;--fg:#eee;--dim:#888;--line:#2a2a2a;--acc:#6cf}
+/* Colors in one place: background, text, dimmed text, lines, raised surfaces, accent. */
+:root{--bg:#0f0f0f;--fg:#f1f1f1;--dim:#aaa;--line:#303030;--card:#272727;--acc:#3ea6ff}
 *{box-sizing:border-box}
 /* Make the hidden attribute win over display:flex and friends below. */
 [hidden]{display:none!important}
 /* overflow-anchor:none: when the player appears it pushes the list down, so
    the rows you were looking at end up just below it, in every browser. */
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;overflow-anchor:none}
-
-/* Page width and the 16px side gutter that keeps content off the screen edge on phones. */
-main,form{max-width:900px;margin:0 auto;padding:0 16px}
-
-/* Login form */
-form{padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
-input,button{font:inherit;color:inherit;background:#1d1d1d;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-input{flex:1;min-width:0}
-button{background:var(--acc);color:#000;border:0}
-#err{width:100%;margin:0;color:#f77}
-
-/* Top row (search box and a quiet sign-out button), then the breadcrumb path */
-#top{display:flex;gap:8px;margin-top:12px}
-#out,#cap button{background:none;color:var(--dim);border:1px solid var(--line);white-space:nowrap}
-nav{margin:8px 0;color:var(--dim);overflow-wrap:anywhere}
 a{color:var(--acc);text-decoration:none}
 
-/* Player and its caption (title and a Close button). The player stays at the
-   top of the screen while the list scrolls under it; empty, it takes no space.
-   flow-root keeps the margins inside, so no list row shows through above or
-   below it. */
-#player{position:sticky;top:0;background:var(--bg);display:flow-root}
-video,audio{width:100%;margin-top:8px}
-video{max-height:55vh;background:#000}
-#player img{display:block;max-width:100%;max-height:55vh;margin:8px auto 0}
-#cap{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:4px 0 8px;color:var(--dim);font-size:14px;overflow-wrap:anywhere}
-#cap button{padding:4px 10px}
+/* Page width and the side gutter that keeps content off the screen edge. */
+main,form{max-width:1600px;margin:0 auto;padding:0 16px}
+@media (min-width:700px){main{padding:0 24px}}
 
-/* File and folder list: name on the left, a small note on the right. */
-ul{list-style:none;margin:0;padding:0}
-li a{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);color:var(--fg)}
-li span{overflow-wrap:anywhere}
-li small{color:var(--dim);white-space:nowrap}
-/* The "Continue" heading above the recently played files on Home. */
-li.h{padding:12px 0 0;color:var(--dim);font-size:14px}
+/* Round "pill" inputs and buttons. A plain button is the light Sign in one. */
+input,button{font:inherit;color:inherit;background:#121212;border:1px solid var(--line);border-radius:40px;padding:8px 16px}
+input{flex:1;min-width:0}
+button{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:600;cursor:pointer}
+
+/* Login form */
+form{max-width:440px;padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
+#err{width:100%;margin:0 16px;color:#f77}
+
+/* Top bar: logo (a link to Home), search box with a magnifier, Sign out.
+   On narrow screens the logo shows only its round icon. */
+#top{display:flex;align-items:center;gap:16px;height:60px}
+#logo{display:flex;align-items:center;gap:8px;color:var(--fg);font-size:19px;letter-spacing:-.4px;white-space:nowrap}
+#logo i{width:28px;height:28px;border-radius:50%;background:var(--acc);display:grid;place-items:center}
+#logo i::after{content:'';width:10px;height:12px;margin-left:3px;background:var(--bg);clip-path:polygon(0 0,100% 50%,0 100%)}
+#q{max-width:640px;margin:0 auto;padding-left:42px;background:#121212 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aaa' stroke-width='2'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E") no-repeat 15px 50%/18px}
+#q:focus{outline:none;border-color:var(--acc)}
+#out,#cap button{background:var(--card);color:var(--fg);border-color:var(--card);font-weight:500;white-space:nowrap}
+@media (max-width:559px){#top{gap:10px}#logo b{display:none}}
+
+/* Breadcrumb path; the folder you are in is the page heading. */
+nav{margin:4px 0 16px;color:var(--dim);overflow-wrap:anywhere}
+nav a{color:var(--dim)}
+nav a:last-child{color:var(--fg);font-size:20px;font-weight:700}
+
+/* Player, then the title, the folder and a Close button. The player stays at
+   the top of the screen while the list scrolls under it; empty, it takes no
+   space. On phones it reaches from edge to edge. z-index keeps the tiles,
+   which are positioned for their badges, from sliding over it. */
+#player{position:sticky;top:0;z-index:1;background:var(--bg);display:flow-root;margin:0 -16px}
+video,audio{display:block;width:100%}
+video{max-height:55vh;background:#000}
+audio{margin-top:8px;padding:0 16px}
+#player img{display:block;max-width:100%;max-height:55vh;margin:0 auto}
+#cap{display:flex;align-items:flex-start;gap:12px;padding:10px 16px 12px}
+#cap div{flex:1;min-width:0}
+#cap h1{margin:0;font-size:16px;line-height:1.3;overflow-wrap:anywhere}
+#cap p{margin:2px 0 0;color:var(--dim);font-size:14px}
+@media (min-width:700px){
+  #player{margin:0}
+  video,#player img{border-radius:12px}
+  audio{padding:0}
+  #cap{padding:12px 0 16px}
+  #cap h1{font-size:20px}
+}
+
+/* While something plays on a wide screen the page splits in two, like a
+   video site: the player on the left (still pinned), the folder path and the
+   list on the right as a column of compact rows. */
+@media (min-width:1000px){
+  #app.watching{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,400px);column-gap:24px;align-items:start}
+  #app.watching #top{grid-column:1/-1}
+  #app.watching #player{grid-area:2/1/4/2}
+  #app.watching nav{grid-area:2/2/3/3}
+  #app.watching #list{grid-area:3/2/4/3}
+  #app.watching video,#app.watching #player img{max-height:calc(100vh - 150px)}
+}
+
+/* The list. By default (phones, and the column beside the player) each entry
+   is a compact row: a picture on the left, title and details on the right.
+   Folders get a round letter badge, files a colored 16:9 tile that shows the
+   kind of file and, in its corner, the size or the saved position. A
+   folder's files share a range of colors. */
+ul{list-style:none;margin:0;padding:0 0 24px;display:grid;gap:12px}
+li a{display:flex;gap:12px;align-items:flex-start;color:var(--fg)}
+li.dir a{align-items:center}
+.t{min-width:0}
+.t span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:500;line-height:1.3}
+.t small{display:block;margin-top:2px;color:var(--dim);font-size:13px}
+.av{flex:0 0 48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:20px;font-weight:600;background:hsl(var(--h) 35% 32%)}
+.tile{position:relative;flex:0 0 42%;max-width:168px;aspect-ratio:16/9;border-radius:8px;display:grid;place-items:center;
+  background:linear-gradient(135deg,hsl(var(--h) 40% 30%),hsl(calc(var(--h) + 50) 40% 15%));font-size:28px;color:#fff}
+.tile::before{content:'';opacity:.85}
+.video::before{width:22%;aspect-ratio:1;background:#fff;clip-path:polygon(28% 15%,28% 85%,88% 50%)}
+.audio::before{content:'\266A'}
+.pic::before{width:32%;aspect-ratio:3/2;background:#fff;clip-path:polygon(0 100%,30% 35%,50% 65%,68% 45%,100% 100%)}
+.pdf::before{content:'PDF';font-size:.6em;font-weight:700;letter-spacing:1px}
+.tile b{position:absolute;right:6px;bottom:6px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.8);font-size:12px;font-weight:600}
+.tile b.at{background:var(--acc);color:#000}
+/* "Continue" heading, and the note under a long search. */
+li.h{grid-column:1/-1;margin-top:4px;font-size:20px;font-weight:700}
+li.more .t span{color:var(--dim);font-weight:400}
+
+/* Wide screens without a player: files as a grid of cards, the tile on top
+   and the title below it. Folders stay compact, and a switch between folders
+   and files (after the Continue cards, or after the folders) starts a new
+   grid row. */
+@media (min-width:700px){
+  #app:not(.watching) ul{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:28px 16px}
+  #app:not(.watching) li:not(.dir) a{flex-direction:column;gap:10px}
+  #app:not(.watching) .tile{flex:none;width:100%;max-width:none;border-radius:12px;font-size:48px}
+  #app:not(.watching) .tile b{font-size:13px}
+  #app:not(.watching) li.dir + li:not(.dir),#app:not(.watching) li:not(.dir) + li.dir{grid-column-start:1}
+}
 </style>
 </head>
 <body>
@@ -69,6 +134,7 @@ li.h{padding:12px 0 0;color:var(--dim);font-size:14px}
 <!-- The library browser. Shown once the file list has loaded. -->
 <main id="app" hidden>
   <div id="top">
+    <a id="logo" href="#/"><i></i><b>HomeStream</b></a>
     <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
     <button id="out">Sign out</button>
   </div>
@@ -106,6 +172,13 @@ const nat = new Intl.Collator(undefined, {numeric: true}).compare;
 // Display name of a file: last path segment, without the extension and without
 // the trailing " [youtubeId]" that yt-dlp adds to downloads.
 const title = p => p.split('/').pop().replace(/\.[^.]+$/, '').replace(/ \[[\w-]{11}\]$/, '');
+// Name of the folder a file is in ('' at the top level).
+const folder = p => p.split('/').slice(-2, -1)[0] || '';
+// Kind of file, which decides how it is shown. These extension checks must
+// match the types list in main.go.
+const kind = p => /\.pdf$/i.test(p) ? 'pdf' : /\.(png|jpe?g|gif|webp)$/i.test(p) ? 'pic' : /\.(mp4|m4v|webm)$/i.test(p) ? 'video' : 'audio';
+// A color (hue 0-359) made from a name, so each folder keeps its own.
+const hue = s => [...s].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
 // Human-readable file size.
 const size = n => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
 // Most search results shown at once, to keep the page fast.
@@ -121,8 +194,10 @@ let files = [];
 let prog = {};
 // Saves the position of the current player. Replaced by every play().
 let save = () => {};
-// The note on the right of a file row: its saved position, or else its size.
+// The note in a file's tile: its saved position, or else its size.
 const note = f => prog[f.p] ? clock(prog[f.p].t) : size(f.s);
+// Wide screens put the list beside the player (see the CSS).
+const wide = () => matchMedia('(min-width:1000px)').matches;
 
 // Fetch the latest saved positions.
 async function sync() {
@@ -147,55 +222,86 @@ $('#login').onsubmit = async e => {
   if (r.ok) { $('#pw').value = ''; load(); }
 };
 
-// Make a link element. Text is set with textContent, never as HTML, so a file
-// name containing < or & cannot inject markup.
+// Make an element with a class. Text is always set with textContent, never as
+// HTML, so a file name containing < or & cannot inject markup.
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text) e.textContent = text;
+  return e;
+}
+
+// Make a link element.
 function link(href, text) {
-  const a = document.createElement('a');
-  a.href = href; a.textContent = text;
+  const a = el('a', '', text);
+  a.href = href;
   return a;
 }
 
-// Make one list row: a name on the left and a small note on the right. If
-// onclick is given, clicking runs it instead of following the link.
-function row(href, text, small, onclick) {
-  const li = document.createElement('li'), a = link(href, ''), s = document.createElement('span'), m = document.createElement('small');
-  s.textContent = text; m.textContent = small;
-  if (onclick) a.onclick = e => { e.preventDefault(); onclick(); };
-  a.append(s, m); li.append(a);
+// Make one list entry: an optional picture, then the title and a line of
+// details. If onclick is given, clicking runs it (with the link, so the
+// player can keep it in view) instead of following the link.
+function row(href, text, small, onclick, pic, cls) {
+  const li = el('li', cls), a = link(href, ''), t = el('div', 't');
+  t.append(el('span', '', text), el('small', '', small));
+  a.title = text; // the full title, when it is cut to two lines
+  if (onclick) a.onclick = e => { e.preventDefault(); onclick(a); };
+  if (pic) a.append(pic);
+  a.append(t); li.append(a);
   return li;
 }
 
-// Open file f. A PDF opens in the browser's own viewer in a new tab and
-// leaves the player alone. Anything else replaces the player, which stays at
-// the top of the screen while the list keeps its place: an image is simply
-// shown, audio and video play from the saved position. Video files get a
-// <video>, other media an <audio>. playsInline stops iPhones from forcing
-// fullscreen. Starting from a tap or click is what allows autoplay and the new
-// tab, so everything happens at once and the position is fetched alongside.
-function play(f) {
-  const url = '/m/' + enc(f.p);
-  if (/\.pdf$/i.test(f.p)) { window.open(url); return; }
+// A folder: round badge with its first letter, its name and its file count.
+function dirRow(path, name, n) {
+  const av = el('div', 'av', [...name][0].toUpperCase());
+  av.style.setProperty('--h', hue(name));
+  return row('#/' + encodeURIComponent(path), name, n + ' files', null, av, 'dir');
+}
+
+// A file: colored tile with its saved position or size, title, and details.
+// The tile's color is its folder's, shifted a little per file.
+function fileRow(f, small) {
+  const tile = el('div', 'tile ' + kind(f.p)), b = el('b', prog[f.p] ? 'at' : '', note(f));
+  tile.style.setProperty('--h', hue(folder(f.p)) + hue(f.p) % 60);
+  tile.append(b);
+  return row('#', title(f.p), small, a => play(f, a), tile);
+}
+
+// Open file f, tapped in list entry a. A PDF opens in the browser's own viewer
+// in a new tab and leaves the player alone. Anything else replaces the player,
+// which stays at the top of the screen while the list keeps its place: an
+// image is simply shown, audio and video play from the saved position.
+// playsInline stops iPhones from forcing fullscreen. Starting from a tap or
+// click is what allows autoplay and the new tab, so everything happens at once
+// and the position is fetched alongside.
+function play(f, a) {
+  const url = '/m/' + enc(f.p), k = kind(f.p);
+  if (k === 'pdf') { window.open(url); return; }
   save(); // remember where the file that is being replaced stopped
-  // These extension checks must match the types list in main.go.
-  const img = /\.(png|jpe?g|gif|webp)$/i.test(f.p);
-  const el = document.createElement(img ? 'img' : /\.(mp4|m4v|webm)$/i.test(f.p) ? 'video' : 'audio');
+  const m = document.createElement(k === 'pic' ? 'img' : k);
   // If the file fails to load because the login expired (the server was
   // restarted), reloading the list brings the login form back.
-  el.onerror = load;
-  el.src = url;
-  const cap = document.createElement('p'), x = document.createElement('button');
-  cap.id = 'cap'; cap.textContent = document.title = title(f.p);
-  // Close saves the position and removes the player, which stops it.
-  x.textContent = 'Close';
-  x.onclick = () => { save(); save = () => {}; $('#player').replaceChildren(); document.title = 'HomeStream'; };
-  cap.append(x);
-  $('#player').replaceChildren(el, cap);
+  m.onerror = load;
+  m.src = url;
+  // Caption: title, folder and a Close button that saves the position and
+  // removes the player, which stops it.
+  const cap = el('div'), t = el('div'), x = el('button', '', 'Close');
+  cap.id = 'cap';
+  t.append(el('h1', '', document.title = title(f.p)), el('p', '', folder(f.p)));
+  cap.append(t, x);
+  x.onclick = () => {
+    save(); save = () => {};
+    $('#player').replaceChildren(); document.title = 'HomeStream';
+    show(false, a);
+  };
+  $('#player').replaceChildren(m, cap);
+  show(true, a);
   // An image has no position, so there is nothing to save or resume.
-  if (img) { save = () => {}; return; }
-  el.controls = el.autoplay = el.playsInline = true;
+  if (k === 'pic') { save = () => {}; return; }
+  m.controls = m.autoplay = m.playsInline = true;
   // Every file starts at half volume; the player's own control changes it.
   // iPhones and iPads ignore this: there the volume follows the device buttons.
-  el.volume = 0.5;
+  m.volume = 0.5;
 
   // save() reports the position to the server. The first and last 30 seconds
   // count as "not started" and "finished" and send 0, which clears the entry.
@@ -208,9 +314,9 @@ function play(f) {
   // another device. last is the time of the latest save.
   let sent = null, last = Date.now();
   save = () => {
-    if (sent === null || !el.duration || el.currentTime === sent) return;
-    sent = el.currentTime;
-    const t = sent < 30 || el.duration - sent < 30 ? 0 : sent;
+    if (sent === null || !m.duration || m.currentTime === sent) return;
+    sent = m.currentTime;
+    const t = sent < 30 || m.duration - sent < 30 ? 0 : sent;
     last = Date.now();
     if (!t && !prog[f.p]) return;
     if (t) prog[f.p] = {t, at: last / 1000}; else delete prog[f.p];
@@ -224,13 +330,22 @@ function play(f) {
   const resume = async () => {
     await sync();
     const t = prog[f.p]?.t;
-    if (t && Math.abs(t - el.currentTime) > 15) el.currentTime = t - 5;
-    sent = el.currentTime;
+    if (t && Math.abs(t - m.currentTime) > 15) m.currentTime = t - 5;
+    sent = m.currentTime;
   };
-  el.onloadedmetadata = el.onplay = resume;
-  el.onpause = el.onseeked = el.onended = save;
+  m.onloadedmetadata = m.onplay = resume;
+  m.onpause = m.onseeked = m.onended = save;
   // While playing, save every 10 seconds.
-  el.ontimeupdate = () => { if (Date.now() - last > 10000) save(); };
+  m.ontimeupdate = () => { if (Date.now() - last > 10000) save(); };
+}
+
+// Switch the page between browsing and watching. On a wide screen this moves
+// the list between the card grid and the column beside the player, so the
+// entry that was tapped is brought back into view. On phones nothing moves.
+function show(on, a) {
+  const was = $('#app').classList.contains('watching');
+  $('#app').classList.toggle('watching', on);
+  if (on !== was && wide() && a?.isConnected) a.scrollIntoView({block: 'center'});
 }
 
 // Redraw breadcrumbs and the list. With text in the search box it shows
@@ -254,12 +369,12 @@ function render() {
   if (words.length) {
     // Search: a file in or below the current folder matches if its path from
     // there contains every typed word. Subfolder names count; the current
-    // folder's own name does not, or it would match everything. The note on
-    // the right is the folder the file lives in.
+    // folder's own name does not, or it would match everything. The details
+    // line names the folder the file lives in.
     const hits = files.filter(f => f.p.startsWith(pre) && words.every(w => f.p.slice(pre.length).toLowerCase().includes(w)));
-    rows = hits.slice(0, MAX).map(f => row('#', title(f.p), f.p.split('/').slice(-2, -1)[0] || '', () => play(f)));
+    rows = hits.slice(0, MAX).map(f => fileRow(f, folder(f.p)));
     // The no-op click handler keeps this note from acting as a link to Home.
-    if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, '', () => {}));
+    if (hits.length > MAX) rows.push(row('#', `… ${hits.length - MAX} more, refine your search`, '', () => {}, null, 'more'));
   } else {
     // Browse: split everything below the current folder into direct files and
     // direct subfolders (with a count of the files inside each).
@@ -270,17 +385,13 @@ function render() {
       if (i < 0) here.push(f); else dirs.set(rest.slice(0, i), (dirs.get(rest.slice(0, i)) || 0) + 1);
     }
     // Folders first, then files, each in natural order.
-    rows = [...[...dirs].sort((a, b) => nat(a[0], b[0])).map(([d, n]) => row('#/' + encodeURIComponent(pre + d), d + '/', n + ' files')),
-            ...here.sort((a, b) => nat(a.p, b.p)).map(f => row('#', title(f.p), note(f), () => play(f)))];
+    rows = [...[...dirs].sort((a, b) => nat(a[0], b[0])).map(([d, n]) => dirRow(pre + d, d, n)),
+            ...here.sort((a, b) => nat(a.p, b.p)).map(f => fileRow(f, ''))];
     // Home starts with the five most recently played unfinished files. It
     // looks at the 20 newest positions and skips files that no longer exist.
     const recent = dir ? [] : Object.keys(prog).sort((a, b) => prog[b].at - prog[a].at).slice(0, 20)
       .map(p => files.find(f => f.p === p)).filter(Boolean).slice(0, 5);
-    if (recent.length) {
-      const h = document.createElement('li');
-      h.className = 'h'; h.textContent = 'Continue';
-      rows.unshift(h, ...recent.map(f => row('#', title(f.p), note(f), () => play(f))));
-    }
+    if (recent.length) rows.unshift(el('li', 'h', 'Continue'), ...recent.map(f => fileRow(f, folder(f.p))));
   }
   $('#list').replaceChildren(...rows);
 }
@@ -299,8 +410,8 @@ document.onvisibilitychange = () => {
 // Typing in the search box redraws the list. Changing folder clears the search.
 $('#q').oninput = render;
 onhashchange = () => { $('#q').value = ''; render(); };
-// Opening a folder or a breadcrumb shows it from the top. The scroll happens
-// after the link is followed, so Back still returns to where you were.
+// Opening a folder, a breadcrumb or the logo shows it from the top. The scroll
+// happens after the link is followed, so Back still returns to where you were.
 document.onclick = e => { if (e.target.closest('a[href^="#/"]')) setTimeout(() => scrollTo(0, 0)); };
 load();
 </script>
