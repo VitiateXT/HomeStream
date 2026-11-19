@@ -10,14 +10,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
 <title>HomeStream</title>
 <style>
 /* Styled roughly like the big video site around 2018: a light gray page
    under a white top bar, Roboto, square thumbnails, flat blue uppercase
-   buttons and a red accent. Colors in one place: background, text, dimmed
-   text, lines, top bar and inputs, blue for buttons and links, red. */
-:root{--bg:#f9f9f9;--fg:#0d0d0d;--dim:#606060;--line:#e5e5e5;--card:#fff;--acc:#065fd4;--red:#c00}
+   buttons and a red accent. It is dark when the device is set to dark mode.
+   Colors in one place: background, text, dimmed text, lines, top bar, search
+   box with its border and its search area, blue for buttons and links, text
+   on blue, red. */
+:root{--bg:#f9f9f9;--fg:#0d0d0d;--dim:#606060;--line:#e5e5e5;--card:#fff;--in:#fff;--inl:#ccc;--btn:#f8f8f8;--acc:#065fd4;--on:#fff;--red:#c00}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#181818;--fg:#fff;--dim:#aaa;--line:#303030;--card:#202020;--in:#121212;--inl:#303030;--btn:#323232;--acc:#3ea6ff;--on:#0d0d0d;--red:#e00}
+}
 *{box-sizing:border-box}
 /* Make the hidden attribute win over display:flex and friends below. */
 [hidden]{display:none!important}
@@ -34,9 +39,9 @@ main,form{max-width:1600px;margin:0 auto;padding:0 16px}
    blue Sign in one. 16px text in the input keeps iPhones from zooming in
    when it is tapped. */
 input,button{font:inherit;color:inherit;border-radius:2px}
-input{flex:1;min-width:0;font-size:16px;padding:6px 10px;background:var(--card);border:1px solid #ccc;box-shadow:inset 0 1px 2px #eee}
-input:focus{outline:none;border-color:#1c62b9}
-button{padding:9px 16px;border:1px solid var(--acc);background:var(--acc);color:#fff;font-weight:500;letter-spacing:.3px;text-transform:uppercase;white-space:nowrap;cursor:pointer}
+input{flex:1;min-width:0;font-size:16px;padding:6px 10px;background:var(--in);border:1px solid var(--inl)}
+input:focus{outline:none;border-color:var(--acc)}
+button{padding:9px 16px;border:1px solid var(--acc);background:var(--acc);color:var(--on);font-weight:500;letter-spacing:.3px;text-transform:uppercase;white-space:nowrap;cursor:pointer}
 
 /* Login form */
 form{max-width:440px;padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
@@ -48,12 +53,12 @@ form{max-width:440px;padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
    right, Sign out. On narrow screens the logo shows only its icon. */
 #top{display:flex;align-items:center;gap:16px;height:56px;margin-bottom:16px;
   border-image:linear-gradient(var(--card) calc(100% - 1px),var(--line) 0) fill 0//0 100vmax}
-#logo{display:flex;align-items:center;gap:6px;color:#212121;font-size:20px;letter-spacing:-.6px;white-space:nowrap}
+#logo{display:flex;align-items:center;gap:6px;color:var(--fg);font-size:20px;letter-spacing:-.6px;white-space:nowrap}
 #logo i{width:28px;height:28px;border-radius:50%;background:var(--red);display:grid;place-items:center}
 #logo i::after{content:'';width:10px;height:12px;margin-left:3px;background:#fff;clip-path:polygon(0 0,100% 50%,0 100%)}
 #q{max-width:640px;margin:0 auto;padding-right:76px;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23606060' stroke-width='2'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E") no-repeat right 23px center/18px,
-    linear-gradient(to left,#f8f8f8 64px,#ccc 64px 65px,var(--card) 65px)}
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23909090' stroke-width='2'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E") no-repeat right 23px center/18px,
+    linear-gradient(to left,var(--btn) 64px,var(--inl) 64px 65px,var(--in) 65px)}
 #out,#cap button{padding:8px 12px;background:none;color:var(--acc)}
 #cap button{border-color:transparent;color:var(--dim)}
 @media (max-width:559px){#top{gap:10px}#logo b{display:none}#out{padding:6px 8px}}

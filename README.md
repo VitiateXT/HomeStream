@@ -20,7 +20,7 @@ thumbnails for your videos.
   letter badge. Videos show a frame from 10% into the video instead (needs
   ffmpeg). While something plays, wide screens show the list beside the
   player; on phones the player stays at the top while you scroll. Close
-  removes it.
+  removes it. The page is light or dark, following the device's setting.
 - Seeking works, because files are sent with HTTP Range support.
 - Video and audio start at half volume, which you can then turn up or down.
   On iPhone and iPad the volume follows the device's buttons instead.
