@@ -192,7 +192,7 @@ const title = p => p.split('/').pop().replace(/\.[^.]+$/, '').replace(/ \[[\w-]{
 // Name of the folder a file is in ('' at the top level).
 const folder = p => p.split('/').slice(-2, -1)[0] || '';
 // Kind of file, which decides how it is shown. These extension checks must
-// match the types list in main.go.
+// match the types list in library.go.
 const kind = p => /\.pdf$/i.test(p) ? 'pdf' : /\.(png|jpe?g|gif|webp)$/i.test(p) ? 'pic' : /\.(mp4|m4v|webm)$/i.test(p) ? 'video' : 'audio';
 // A color (hue 0-359) made from a name, so each folder keeps its own.
 const hue = s => [...s].reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
@@ -439,10 +439,21 @@ document.onvisibilitychange = () => {
 
 // Typing in the search box redraws the list. Changing folder clears the search.
 $('#q').oninput = render;
-onhashchange = () => { $('#q').value = ''; render(); };
-// Opening a folder, a breadcrumb or the logo shows it from the top. The scroll
-// happens after the link is followed, so Back still returns to where you were.
-document.onclick = e => { if (e.target.closest('a[href^="#/"]')) setTimeout(() => scrollTo(0, 0)); };
+//
+// The page puts a folder back where it was scrolled itself, after redrawing
+// it; the browser would sometimes do it too early, while the list on screen
+// is still the other folder's, and end up at the top. Opening a folder, a
+// breadcrumb or the logo first notes the current place in this history
+// entry; the new entry has no note, so the new folder shows from the top.
+// Back returns to the entry with the note.
+history.scrollRestoration = 'manual';
+onhashchange = () => { $('#q').value = ''; render(); scrollTo(0, history.state?.y ?? 0); };
+document.onclick = e => {
+  const a = e.target.closest('a[href^="#/"]');
+  if (!a) return;
+  history.replaceState({y: scrollY}, '');
+  if (a.hash === location.hash) scrollTo(0, 0); // already there: just go to the top
+};
 load();
 </script>
 </body>

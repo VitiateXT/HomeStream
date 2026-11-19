@@ -24,33 +24,26 @@
 //	HS_PROGRESS  saved positions     (default ~/.config/homestream/progress.json)
 //
 // Thumbnails are kept in ~/.cache/homestream/thumbs.
+//
+// The code is split by job:
+//
+//	main.go      configuration, the server type and the routes
+//	auth.go      LAN check, password, session cookie
+//	library.go   which files exist and may be served, the index, the files
+//	progress.go  saved playback positions
+//	thumbs.go    video thumbnails
 package main
 
 import (
-	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	_ "embed"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"io/fs"
 	"log"
-	"mime"
-	"net"
 	"net/http"
-	"net/netip"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -60,41 +53,6 @@ import (
 //
 //go:embed index.html
 var indexHTML []byte
-
-// types lists the file extensions that are served and their Content-Type.
-// Any other file (.txt, .part, ...) is invisible: it is neither listed nor
-// downloadable. To serve a new format, add it here and to the extension
-// checks in play() in index.html, which decide how a file is shown. SVG is
-// left out on purpose: an SVG can carry scripts, which would run as part of
-// this site.
-var types = map[string]string{
-	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
-	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac",
-	".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
-	".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
-	".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
-}
-
-// videos lists the extensions that get a thumbnail.
-var videos = map[string]bool{".mp4": true, ".m4v": true, ".webm": true}
-
-// sessionTTL is how long a login stays valid.
-const sessionTTL = 30 * 24 * time.Hour
-
-func init() {
-	// Register the types explicitly so the Content-Type never depends on
-	// the host's /etc/mime.types.
-	for ext, t := range types {
-		mime.AddExtensionType(ext, t)
-	}
-}
-
-// entry is one file in the library index. The JSON keys are kept short
-// because the index holds thousands of entries.
-type entry struct {
-	P string `json:"p"` // path relative to the media root, always with "/"
-	S int64  `json:"s"` // size in bytes
-}
 
 // server holds the state shared by all request handlers.
 type server struct {
@@ -111,24 +69,12 @@ type server struct {
 	// loginMu serialises login attempts so that at most one guess per delay
 	// is possible, however many connections an attacker opens.
 	loginMu sync.Mutex
-	// prog holds the saved playback position of every started file, keyed by
-	// its path. There is one password and so one user: all devices share it.
-	prog map[string]pos
-	// progMu guards prog. It is separate from loginMu, which is held for a
-	// whole second after a wrong password and must not hold up saving.
-	progMu sync.Mutex
-	// store is the file prog is saved to. Empty means memory only.
-	store string
+	// pos holds the saved playback positions.
+	pos positions
 	// thumbs is the folder thumbnails are cached in. Empty means none are made.
 	thumbs string
 	// busy limits how many thumbnails are made at the same time.
 	busy chan struct{}
-}
-
-// pos is the saved playback position of one file.
-type pos struct {
-	T  float64 `json:"t"`  // seconds from the start
-	At int64   `json:"at"` // Unix time of the save, orders the Continue list
 }
 
 // newServer prepares a server for the media folder root and the given password.
@@ -142,24 +88,12 @@ func newServer(root, password string) (*server, error) {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return nil, errors.New(root + " is not a directory")
 	}
-	s := &server{root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second, prog: map[string]pos{}, busy: make(chan struct{}, 8)}
+	s := &server{
+		root: root, pwHash: sha256.Sum256([]byte(password)), secret: make([]byte, 32), delay: time.Second,
+		pos: positions{m: map[string]pos{}}, busy: make(chan struct{}, 8),
+	}
 	_, err = rand.Read(s.secret)
 	return s, err
-}
-
-// load reads the saved positions from file and remembers it as the place to
-// save later changes. A missing file is normal on first start. An unreadable
-// one is logged and replaced by the next save.
-func (s *server) load(file string) {
-	s.store = file
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return
-	}
-	if err := json.Unmarshal(b, &s.prog); err != nil || s.prog == nil {
-		log.Printf("ignoring unreadable %s: %v", file, err)
-		s.prog = map[string]pos{}
-	}
 }
 
 // routes builds the request handler. Only the page, login and logout are
@@ -181,351 +115,12 @@ func (s *server) routes() http.Handler {
 	return guard(mux)
 }
 
-// hidden reports whether a single path segment must never be listed or
-// served: dotfiles and dot-folders (such as .Trash-1000) and lost+found.
-// A name starting with "..." is an ordinary title, not a hidden file.
-func hidden(name string) bool {
-	return strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "...") || name == "lost+found"
-}
-
-// allowed reports whether a cleaned, slash-separated path relative to the
-// media root may be listed and served. It is the single gatekeeper used by
-// the index, the file download and the saved positions, so a hidden file
-// cannot be fetched by guessing its URL.
-func allowed(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		if seg == "" || hidden(seg) {
-			return false
-		}
-	}
-	_, ok := types[strings.ToLower(path.Ext(rel))]
-	return ok
-}
-
-// isLAN reports whether a "host:port" client address is on the local network:
-// loopback, private (10.x, 172.16-31.x, 192.168.x, fc00::/7) or link-local.
-// Anything else, such as a public address, is refused.
-func isLAN(remote string) bool {
-	host, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		return false
-	}
-	a, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
-	}
-	a = a.Unmap() // treat ::ffff:192.168.1.5 like 192.168.1.5
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
-}
-
-// sameOrigin reports whether a request was made by HomeStream's own page.
-// Browsers mark requests that another website or another web app on this PC
-// makes on the visitor's behalf: with Sec-Fetch-Site, or in older browsers
-// with Origin. Requests from tools such as curl carry neither and pass; they
-// do not run in the visitor's logged-in browser.
-func sameOrigin(r *http.Request) bool {
-	if s := r.Header.Get("Sec-Fetch-Site"); s != "" {
-		return s == "same-origin"
-	}
-	o := r.Header.Get("Origin")
-	return o == "" || o == "https://"+r.Host
-}
-
-// guard is the outermost handler. It rejects clients that are not on the LAN,
-// as a second line of defense behind the firewall, and tells browsers not to
-// guess content types.
-//
-// Every POST (login, logout, saving a position) must come from HomeStream's
-// own page. Otherwise a website the visitor opens could use their browser,
-// which is on the LAN, to guess the password (a wrong one takes a second, the
-// right one does not) or to act with their login. Its body must also arrive
-// within 10 seconds, so a client cannot hold a connection open forever by
-// sending it slowly.
-func guard(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isLAN(r.RemoteAddr) {
-			http.Error(w, "LAN only", http.StatusForbidden)
-			return
-		}
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if r.Method == http.MethodPost {
-			if !sameOrigin(r) {
-				http.Error(w, "cross-site request refused", http.StatusForbidden)
-				return
-			}
-			http.NewResponseController(w).SetReadDeadline(time.Now().Add(10 * time.Second))
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// sign returns a session token that expires at the Unix time exp. The token
-// has the form "<exp>.<hex HMAC-SHA256 of exp>". It is stateless: the server
-// stores nothing and only needs the secret to check a token later.
-func (s *server) sign(exp int64) string {
-	e := strconv.FormatInt(exp, 10)
-	m := hmac.New(sha256.New, s.secret)
-	m.Write([]byte(e))
-	return e + "." + hex.EncodeToString(m.Sum(nil))
-}
-
-// valid reports whether tok is a token made by sign that has not expired.
-// It recomputes the token for the claimed expiry and compares in constant
-// time, so a forged or edited token fails.
-func (s *server) valid(tok string) bool {
-	e, _, ok := strings.Cut(tok, ".")
-	exp, err := strconv.ParseInt(e, 10, 64)
-	if !ok || err != nil || time.Now().Unix() > exp {
-		return false
-	}
-	return hmac.Equal([]byte(tok), []byte(s.sign(exp)))
-}
-
-// auth wraps a handler so that it only runs for requests carrying a valid
-// session cookie. Everyone else gets 401, which the web page reads as
-// "show the login form".
-func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie("hs"); err != nil || !s.valid(c.Value) {
-			http.Error(w, "login required", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
-
-// login checks the password sent as the request body and, if it is right,
-// sets the session cookie.
-//
-// The password is hashed first so the comparison always works on two
-// fixed-length values and takes the same time for any input. loginMu is held
-// while sleeping after a wrong password, which means failed attempts are
-// handled one at a time. A correct login can therefore be delayed for a moment
-// while wrong guesses are queued; that is the price of the rate limit. A body
-// that does not arrive in full is refused at once instead of joining the
-// queue. Wrong passwords are logged with the client's address, at most one a
-// second because of the lock.
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	pw, err := io.ReadAll(io.LimitReader(r.Body, 1024))
-	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	h := sha256.Sum256(pw)
-	s.loginMu.Lock()
-	defer s.loginMu.Unlock()
-	if subtle.ConstantTimeCompare(h[:], s.pwHash[:]) != 1 {
-		log.Printf("wrong password from %s", r.RemoteAddr)
-		time.Sleep(s.delay)
-		http.Error(w, "wrong password", http.StatusUnauthorized)
-		return
-	}
-	// HttpOnly: scripts cannot read it. Secure: only sent over HTTPS.
-	// SameSite=Lax: not sent on cross-site requests.
-	http.SetCookie(w, &http.Cookie{
-		Name: "hs", Value: s.sign(time.Now().Add(sessionTTL).Unix()), Path: "/",
-		MaxAge: int(sessionTTL.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
-	})
-}
-
-// logout deletes the session cookie in the browser that asks (MaxAge -1).
-//
-// Sessions are stateless, so the server cannot cancel a token: a copy of the
-// cookie kept elsewhere stays valid until it expires. Restarting the server
-// ends every session.
-func logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: "hs", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-}
-
-// index answers with the list of every servable file as JSON. It walks the
-// media folder on each request, which is fast enough for thousands of files.
-// The web page builds folders and search from this one flat list.
-//
-// Unreadable folders are skipped silently. Symlinks are not listed: WalkDir
-// does not follow linked folders, and linked files are not regular files.
-func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	out := []entry{}
-	filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
-		rel, _ := filepath.Rel(s.root, p)
-		if err != nil || rel == "." {
-			return nil
-		}
-		if d.IsDir() && hidden(d.Name()) {
-			return filepath.SkipDir // do not descend into .Trash-1000 etc.
-		}
-		rel = filepath.ToSlash(rel)
-		if d.Type().IsRegular() && allowed(rel) {
-			if fi, err := d.Info(); err == nil {
-				out = append(out, entry{rel, fi.Size()})
-			}
-		}
-		return nil
-	})
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(out)
-}
-
-// progress answers with every saved playback position as JSON. The lock is
-// released before sending, so a device that stalls while downloading cannot
-// hold up saving for everyone else.
-func (s *server) progress(w http.ResponseWriter, r *http.Request) {
-	s.progMu.Lock()
-	b, _ := json.Marshal(s.prog)
-	s.progMu.Unlock()
+// sendJSON answers with b, which is already JSON. no-store makes browsers
+// ask again every time, so they never show a stale list or position.
+func sendJSON(w http.ResponseWriter, b []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b)
-}
-
-// saveProgress stores the position sent as {"p": path, "t": seconds}. A t of
-// zero or less forgets the file, which is how a finished one is cleared.
-//
-// allowed only accepts a clean media path, so nothing else can become a key.
-// The whole map is then written to a temporary file and renamed over the real
-// one. A rename is atomic, so a crash never leaves a half-written file. The
-// map is small and a playing device saves every ten seconds, so this is cheap.
-func (s *server) saveProgress(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		P string  `json:"p"`
-		T float64 `json:"t"`
-	}
-	if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in) != nil || !allowed(in.P) {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	s.progMu.Lock()
-	defer s.progMu.Unlock()
-	if in.T <= 0 {
-		delete(s.prog, in.P)
-	} else {
-		s.prog[in.P] = pos{in.T, time.Now().Unix()}
-	}
-	if s.store != "" {
-		b, _ := json.Marshal(s.prog)
-		err := os.WriteFile(s.store+".tmp", b, 0o600)
-		if err == nil {
-			err = os.Rename(s.store+".tmp", s.store)
-		}
-		if err != nil {
-			log.Print(err)
-		}
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// resolve turns the part of a URL after /m/ or /t/ into a file in the media
-// folder: its path relative to the root and its full path. ok is false if it
-// may not be served.
-//
-// Cleaning the path after a leading "/" removes every "..", so the request
-// cannot climb out of the media folder. allowed then applies the same filter
-// as the index, and symlinks are refused: EvalSymlinks returns the path
-// unchanged unless a symlink is involved, and a link named x.mp4 could point
-// at any file outside the media folder.
-func (s *server) resolve(p string) (rel, full string, ok bool) {
-	rel = strings.TrimPrefix(path.Clean("/"+p), "/")
-	if !allowed(rel) {
-		return "", "", false
-	}
-	full = filepath.Join(s.root, filepath.FromSlash(rel))
-	if p, err := filepath.EvalSymlinks(full); err != nil || p != full {
-		return "", "", false
-	}
-	return rel, full, true
-}
-
-// media sends one file from the media folder.
-//
-// http.ServeContent does the heavy lifting: it understands Range requests and
-// answers them with 206 Partial Content, which is what lets a browser seek
-// inside a film without downloading it all, and it sets Content-Length and
-// Last-Modified. Files are never loaded into memory.
-func (s *server) media(w http.ResponseWriter, r *http.Request) {
-	rel, full, ok := s.resolve(strings.TrimPrefix(r.URL.Path, "/m/"))
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	f, err := os.Open(full)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || !fi.Mode().IsRegular() {
-		http.NotFound(w, r)
-		return
-	}
-	http.ServeContent(w, r, rel, fi.ModTime(), f)
-}
-
-// thumb sends a small JPEG of the frame 10% into a video. It is made on first
-// request and then kept in the thumbs folder, named after the video's path,
-// size and modification time, so a changed video gets a new one. Anything
-// that goes wrong (no ffmpeg, a broken video) answers 404, and the page keeps
-// its colored tile instead.
-func (s *server) thumb(w http.ResponseWriter, r *http.Request) {
-	rel, full, ok := s.resolve(strings.TrimPrefix(r.URL.Path, "/t/"))
-	if !ok || s.thumbs == "" || !videos[strings.ToLower(path.Ext(rel))] {
-		http.NotFound(w, r)
-		return
-	}
-	fi, err := os.Stat(full)
-	if err != nil || !fi.Mode().IsRegular() {
-		http.NotFound(w, r)
-		return
-	}
-	key := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%d", rel, fi.Size(), fi.ModTime().UnixNano())))
-	jpg := filepath.Join(s.thumbs, hex.EncodeToString(key[:16])+".jpg")
-	if _, err := os.Stat(jpg); err != nil && !s.makeThumb(r.Context(), full, jpg) {
-		http.NotFound(w, r)
-		return
-	}
-	f, err := os.Open(jpg)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	w.Header().Set("Cache-Control", "private, max-age=604800")
-	http.ServeContent(w, r, "thumb.jpg", fi.ModTime(), f)
-}
-
-// makeThumb runs ffmpeg to save one frame of video as jpg, 480 pixels wide.
-// At most cap(busy) run at once; a request whose page has moved on while it
-// waits is dropped. It writes a temporary file and renames it, so a cut-off
-// run never leaves half a thumbnail behind.
-func (s *server) makeThumb(ctx context.Context, video, jpg string) bool {
-	select {
-	case s.busy <- struct{}{}:
-		defer func() { <-s.busy }()
-	case <-ctx.Done():
-		return false
-	}
-	if _, err := os.Stat(jpg); err == nil {
-		return true // made by another request while this one waited
-	}
-	page := ctx
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	// The length, to pick a frame past any black opening. Unknown: the first.
-	out, _ := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", video).Output()
-	d, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
-	tmp := jpg + ".tmp"
-	err := exec.CommandContext(ctx, "ffmpeg", "-nostdin", "-v", "error", "-ss", strconv.FormatFloat(d/10, 'f', 2, 64), "-i", video,
-		"-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "5", "-f", "image2", "-y", tmp).Run()
-	if err == nil {
-		err = os.Rename(tmp, jpg)
-	}
-	if err != nil {
-		os.Remove(tmp)
-		if page.Err() == nil { // not when the page simply moved on
-			log.Printf("no thumbnail for %s: %v", video, err)
-		}
-	}
-	return err == nil
 }
 
 // env returns the environment variable key, or def if it is unset or empty.
@@ -548,18 +143,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	s.load(env("HS_PROGRESS", filepath.Join(cfg, "progress.json")))
-	// Thumbnails need ffmpeg. Without it, or without a cache folder, videos
-	// keep their colored tiles.
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		log.Print("ffmpeg not found, so videos get no thumbnails")
-	} else if c, err := os.UserCacheDir(); err == nil {
-		s.thumbs = filepath.Join(c, "homestream", "thumbs")
-		if err := os.MkdirAll(s.thumbs, 0o700); err != nil {
-			log.Print(err)
-			s.thumbs = ""
-		}
-	}
+	s.pos.load(env("HS_PROGRESS", filepath.Join(cfg, "progress.json")))
+	s.thumbs = thumbDir()
 	// There is deliberately no WriteTimeout: a film takes hours to play and
 	// the response must stay open for as long as the viewer keeps watching.
 	srv := &http.Server{

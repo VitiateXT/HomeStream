@@ -240,8 +240,12 @@ go test ./...
 
 | File                  | Purpose                                              |
 |-----------------------|------------------------------------------------------|
-| `main.go`             | The whole server                                     |
+| `main.go`             | Configuration, routes, starting the server           |
+| `auth.go`             | LAN check, password, session cookie                  |
+| `library.go`          | Which files are served, the file list, the files     |
+| `progress.go`         | Saved playback positions                             |
+| `thumbs.go`           | Video thumbnails                                     |
 | `index.html`          | The web page, built into the binary                  |
-| `main_test.go`        | Tests: login, files, thumbnails, positions, LAN, ... |
+| `*_test.go`           | Tests, one file per part, plus the whole flow        |
 | `homestream.service`  | systemd user service                                 |
 | `setup.sh`            | First-time setup on a new PC                         |

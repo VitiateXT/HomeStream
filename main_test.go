@@ -1,48 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
-	"time"
 )
-
-// Which paths may be listed and served.
-func TestAllowed(t *testing.T) {
-	for rel, want := range map[string]bool{
-		"Films/300.mp4": true, "a/b.MP3": true, "a/b [x].opus": true,
-		"a/b.txt": false, "a/b.mp4.part": false, ".Trash-1000/x.mp4": false,
-		"a/.hid/x.mp4": false, "lost+found/x.mp3": false, "": false, "a//b.mp4": false,
-		"a/...title.mp4": true, "a/._junk.mp4": false, "../x.mp4": false,
-		"Books/a.pdf": true, "p/x.JPG": true, "p/x.webp": true, "p/x.svg": false, "p/x.heic": false,
-	} {
-		if got := allowed(rel); got != want {
-			t.Errorf("allowed(%q) = %v, want %v", rel, got, want)
-		}
-	}
-}
-
-// Which client addresses count as "on the LAN".
-func TestIsLAN(t *testing.T) {
-	for addr, want := range map[string]bool{
-		"192.168.188.7:1": true, "10.0.0.1:1": true, "127.0.0.1:1": true, "[::1]:1": true,
-		"[::ffff:192.168.1.1]:1": true, "[fd00::1]:1": true, "[fe80::1]:1": true,
-		"8.8.8.8:1": false, "[2001:db8::1]:1": false, "garbage": false,
-	} {
-		if got := isLAN(addr); got != want {
-			t.Errorf("isLAN(%q) = %v, want %v", addr, got, want)
-		}
-	}
-}
 
 // testServer returns a server over a small library that holds one of each
 // case: playable files, a PDF, a text file, a hidden folder, lost+found and
@@ -78,82 +46,59 @@ func do(h http.Handler, method, target, body string, mod func(*http.Request)) *h
 	return w
 }
 
-// Session tokens: only an untouched, unexpired one is valid.
-func TestSession(t *testing.T) {
-	s, _ := newServer(t.TempDir(), "pw")
-	future := time.Now().Add(time.Hour).Unix()
-	good := s.sign(future)
-	tampered := strings.Replace(good, strconv.FormatInt(future, 10), strconv.FormatInt(future+1, 10), 1)
-	for name, tc := range map[string]struct {
-		tok  string
-		want bool
-	}{
-		"good": {good, true}, "expired": {s.sign(time.Now().Add(-time.Hour).Unix()), false},
-		"tampered": {tampered, false}, "garbage": {"x", false}, "empty": {"", false},
-	} {
-		if got := s.valid(tc.tok); got != tc.want {
-			t.Errorf("%s: valid = %v, want %v", name, got, tc.want)
+// loggedIn logs in with the password "pw" and returns a mod for do that adds
+// the session cookie.
+func loggedIn(t *testing.T, h http.Handler) func(*http.Request) {
+	cs := do(h, "POST", "/api/login", "pw", nil).Result().Cookies()
+	if len(cs) != 1 {
+		t.Fatalf("login gave %d cookies, want 1", len(cs))
+	}
+	return func(r *http.Request) { r.AddCookie(cs[0]) }
+}
+
+// The media folder must be a folder, and may be a symlink to one (as
+// ~/Media -> /mnt/media is).
+func TestNewServer(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "file"), nil, 0o644)
+	os.Mkdir(filepath.Join(dir, "real"), 0o755)
+	os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "link"))
+	for _, root := range []string{filepath.Join(dir, "nope"), filepath.Join(dir, "file")} {
+		if _, err := newServer(root, "pw"); err == nil {
+			t.Errorf("newServer(%s) worked, want an error", root)
 		}
 	}
-}
-
-// Saved positions must survive a restart, and a damaged file must not stop
-// the server from starting.
-func TestProgressFile(t *testing.T) {
-	root, file := t.TempDir(), filepath.Join(t.TempDir(), "progress.json")
-	start := func() (http.Handler, func(*http.Request)) {
-		s, _ := newServer(root, "pw")
-		s.load(file)
-		h := s.routes()
-		c := do(h, "POST", "/api/login", "pw", nil).Result().Cookies()[0]
-		return h, func(r *http.Request) { r.AddCookie(c) }
+	s, err := newServer(filepath.Join(dir, "link"), "pw")
+	if err != nil || s.root != filepath.Join(dir, "real") {
+		t.Errorf("newServer(link) = %v, %v, want root %s", s, err, filepath.Join(dir, "real"))
 	}
-	h, authed := start() // no file yet
-	do(h, "POST", "/api/progress", `{"p":"x/y.mp3","t":1234}`, authed)
-
-	h, authed = start() // "restart"
-	if body := do(h, "GET", "/api/progress", "", authed).Body.String(); !strings.Contains(body, `"x/y.mp3":{"t":1234,`) {
-		t.Errorf("after restart progress = %s, want x/y.mp3 at 1234", body)
+	t.Setenv("HS_TEST", "")
+	if env("HS_TEST", "def") != "def" {
+		t.Error("env with an empty variable did not use the default")
 	}
-	if _, err := os.Stat(file + ".tmp"); err == nil {
-		t.Error("temporary file was left behind")
-	}
-
-	os.WriteFile(file, []byte("{half a fi"), 0o600)
-	h, authed = start()
-	if body := strings.TrimSpace(do(h, "GET", "/api/progress", "", authed).Body.String()); body != "{}" {
-		t.Errorf("progress from a damaged file = %s, want {}", body)
+	t.Setenv("HS_TEST", "x")
+	if env("HS_TEST", "def") != "x" {
+		t.Error("env did not use the variable")
 	}
 }
 
-// stalledWriter is a client that stops reading as soon as an answer starts.
-type stalledWriter struct{ started, release chan struct{} }
-
-func (s stalledWriter) Header() http.Header { return http.Header{} }
-func (s stalledWriter) WriteHeader(int)     {}
-func (s stalledWriter) Write(b []byte) (int, error) {
-	s.started <- struct{}{}
-	<-s.release
-	return len(b), nil
-}
-
-// A device that stalls while downloading the positions must not stop the
-// other devices from saving.
-func TestStalledReader(t *testing.T) {
-	s, _ := newServer(t.TempDir(), "pw")
-	w := stalledWriter{make(chan struct{}), make(chan struct{})}
-	defer close(w.release)
-	go s.progress(w, httptest.NewRequest("GET", "/api/progress", nil))
-	<-w.started
-	saved := make(chan struct{})
-	go func() {
-		s.saveProgress(httptest.NewRecorder(), httptest.NewRequest("POST", "/api/progress", strings.NewReader(`{"p":"a/b.mp4","t":90}`)))
-		close(saved)
-	}()
-	select {
-	case <-saved:
-	case <-time.After(2 * time.Second):
-		t.Fatal("saving waits for a stalled reader")
+// The page is public and the only thing served at the top level.
+func TestPage(t *testing.T) {
+	h := testServer(t)
+	w := do(h, "GET", "/", "", nil)
+	if w.Code != 200 || w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), "<title>HomeStream</title>") {
+		t.Errorf("page = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("nosniff header missing")
+	}
+	for _, p := range []string{"/index.html", "/main.go", "/api/", "/m/", "/x"} {
+		if c := do(h, "GET", p, "", nil).Code; c != 404 && c != 401 {
+			t.Errorf("GET %s = %d, want 404 or 401", p, c)
+		}
+	}
+	if c := do(h, "DELETE", "/api/progress", "", nil).Code; c != 405 {
+		t.Errorf("DELETE /api/progress = %d, want 405", c)
 	}
 }
 
@@ -197,7 +142,7 @@ func TestFlow(t *testing.T) {
 	if login.Code != 200 || len(cs) != 1 {
 		t.Fatalf("login = %d, cookies = %d", login.Code, len(cs))
 	}
-	if c := cs[0]; !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode {
+	if c := cs[0]; !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.MaxAge != int(sessionTTL.Seconds()) {
 		t.Errorf("cookie flags wrong: %+v", c)
 	}
 	authed := func(r *http.Request) { r.AddCookie(cs[0]) }
@@ -209,6 +154,9 @@ func TestFlow(t *testing.T) {
 	}
 	if len(got) != 3 || got[0].P != "a/b.mp4" || got[1].P != "a/d.pdf" || got[2].P != "f.MP3" || got[0].S != 10 {
 		t.Errorf("index = %+v, want [a/b.mp4 a/d.pdf f.MP3]", got)
+	}
+	if idx.Header().Get("Content-Type") != "application/json" || idx.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("index headers = %v", idx.Header())
 	}
 
 	if w := do(h, "GET", "/m/a/b.mp4", "", authed); w.Code != 200 || w.Header().Get("Content-Type") != "video/mp4" {
@@ -222,10 +170,13 @@ func TestFlow(t *testing.T) {
 	if w.Code != 206 || w.Header().Get("Content-Type") != "application/pdf" {
 		t.Errorf("pdf range = %d %q", w.Code, w.Header().Get("Content-Type"))
 	}
+	if w := do(h, "GET", "/m/f.MP3", "", authed); w.Code != 200 || w.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Errorf("upper-case extension = %d %q", w.Code, w.Header().Get("Content-Type"))
+	}
 
 	for _, p := range []string{
 		"/m/a/c.txt", "/m/.hid/d.mp4", "/m/lost+found/e.mp3", "/m/nope.mp4", "/m/link.mp4", "/m/dirlink/b.mp4",
-		"/m/../secret.mp4", "/m/..%2fsecret.mp4", "/m/%2e%2e/secret.mp4", "/m/a/..%2f..%2fsecret.mp4",
+		"/m/../secret.mp4", "/m/..%2fsecret.mp4", "/m/%2e%2e/secret.mp4", "/m/a/..%2f..%2fsecret.mp4", "/m/a",
 	} {
 		if c := do(h, "GET", p, "", authed).Code; c == 200 {
 			t.Errorf("GET %s = 200, want a refusal", p)
@@ -264,46 +215,7 @@ func TestFlow(t *testing.T) {
 	}
 
 	out := do(h, "POST", "/api/logout", "", authed).Result().Cookies()
-	if len(out) != 1 || out[0].Name != "hs" || out[0].Value != "" || out[0].MaxAge >= 0 {
+	if len(out) != 1 || out[0].Name != "hs" || out[0].Value != "" || out[0].MaxAge >= 0 || !out[0].Secure || !out[0].HttpOnly {
 		t.Errorf("logout cookies = %+v, want one empty, expired hs cookie", out)
-	}
-}
-
-// Thumbnails: login required, the same refusals as for media, made once with
-// ffmpeg and then served from the cache. A broken video leaves nothing behind.
-func TestThumb(t *testing.T) {
-	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "a/.hid"), 0o755)
-	for _, p := range []string{"a/broken.mp4", "a/song.mp3", "a/.hid/x.mp4"} {
-		os.WriteFile(filepath.Join(root, p), []byte("0123456789"), 0o644)
-	}
-	s, _ := newServer(root, "pw")
-	s.thumbs = t.TempDir()
-	h := s.routes()
-	c := do(h, "POST", "/api/login", "pw", nil).Result().Cookies()[0]
-	authed := func(r *http.Request) { r.AddCookie(c) }
-
-	if code := do(h, "GET", "/t/a/broken.mp4", "", nil).Code; code != 401 {
-		t.Errorf("thumbnail without cookie = %d, want 401", code)
-	}
-	for _, p := range []string{"/t/a/song.mp3", "/t/a/.hid/x.mp4", "/t/../x.mp4", "/t/%2e%2e/x.mp4", "/t/a/nope.mp4", "/t/a/broken.mp4"} {
-		if code := do(h, "GET", p, "", authed).Code; code == 200 {
-			t.Errorf("GET %s = 200, want a refusal", p)
-		}
-	}
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	if err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=d=2:s=320x240", "-pix_fmt", "yuv420p", filepath.Join(root, "a/v.mp4")).Run(); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 2; i++ { // made, then from the cache
-		w := do(h, "GET", "/t/a/v.mp4", "", authed)
-		if w.Code != 200 || w.Header().Get("Content-Type") != "image/jpeg" || !bytes.HasPrefix(w.Body.Bytes(), []byte{0xff, 0xd8}) {
-			t.Errorf("thumbnail %d = %d %q", i, w.Code, w.Header().Get("Content-Type"))
-		}
-	}
-	if m, _ := filepath.Glob(filepath.Join(s.thumbs, "*")); len(m) != 1 {
-		t.Errorf("cache holds %v, want just one thumbnail", m)
 	}
 }
