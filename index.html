@@ -299,6 +299,9 @@ document.onvisibilitychange = () => {
 // Typing in the search box redraws the list. Changing folder clears the search.
 $('#q').oninput = render;
 onhashchange = () => { $('#q').value = ''; render(); };
+// Opening a folder or a breadcrumb shows it from the top. The scroll happens
+// after the link is followed, so Back still returns to where you were.
+document.onclick = e => { if (e.target.closest('a[href^="#/"]')) setTimeout(() => scrollTo(0, 0)); };
 load();
 </script>
 </body>
