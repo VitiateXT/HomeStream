@@ -15,12 +15,12 @@ thumbnails for your videos.
   (png, jpg, gif, webp).
 - Browse folders, and search the folder you are in (on the start page, the
   whole library).
-- Laid out like a video site: files are cards with a colored tile that shows
-  the kind of file and its size or saved position, and folders have a round
-  letter badge. Videos show a frame from 10% into the video instead (needs
-  ffmpeg). While something plays, wide screens show the list beside the
-  player; on phones the player stays at the top while you scroll. Close
-  removes it.
+- Styled like a video site of the late 2000s: a white page, blue links and
+  glossy bars and buttons. Files have a small framed tile that shows the kind
+  of file and its size or saved position, and folders have a square letter
+  badge. Videos show a frame from 10% into the video instead (needs ffmpeg).
+  While something plays, wide screens show the list beside the player; on
+  phones the player stays at the top while you scroll. Close removes it.
 - Seeking works, because files are sent with HTTP Range support.
 - Video and audio start at half volume, which you can then turn up or down.
   On iPhone and iPad the volume follows the device's buttons instead.

@@ -10,74 +10,89 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <title>HomeStream</title>
 <style>
-/* Colors in one place: background, text, dimmed text, lines, raised surfaces, accent. */
-:root{--bg:#0f0f0f;--fg:#f1f1f1;--dim:#aaa;--line:#303030;--card:#272727;--acc:#3ea6ff}
+/* A throwback to the video sites of the late 2000s: a white fixed-width
+   page, Arial, blue links, glossy gradient bars and buttons, and small framed
+   4:3 thumbnails. Colors in one place: background, text, dimmed text, lines,
+   links, and the red of the logo and of saved positions. */
+:root{--bg:#fff;--fg:#000;--dim:#666;--line:#ccc;--link:#03c;--red:#c00}
 *{box-sizing:border-box}
 /* Make the hidden attribute win over display:flex and friends below. */
 [hidden]{display:none!important}
 /* overflow-anchor:none: when the player appears it pushes the list down, so
    the rows you were looking at end up just below it, in every browser. */
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,sans-serif;overflow-anchor:none}
-a{color:var(--acc);text-decoration:none}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.35 Arial,Helvetica,sans-serif;overflow-anchor:none}
+@media (max-width:699px){body{font-size:15px}}
+a{color:var(--link);text-decoration:none}
 
 /* Page width and the side gutter that keeps content off the screen edge. */
-main,form{max-width:1600px;margin:0 auto;padding:0 16px}
-@media (min-width:700px){main{padding:0 24px}}
+main{max-width:1000px;margin:0 auto;padding:0 16px}
 
-/* Round "pill" inputs and buttons. A plain button is the light Sign in one. */
-input,button{font:inherit;color:inherit;background:#121212;border:1px solid var(--line);border-radius:40px;padding:8px 16px}
-input{flex:1;min-width:0}
-button{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:600;cursor:pointer}
+/* Square inputs with a sunken edge, glossy gray buttons. 16px text in the
+   input keeps iPhones from zooming in when it is tapped. */
+input,button{font:inherit;color:inherit}
+input{flex:1;min-width:0;font-size:16px;padding:4px 6px;background:#fff;border:1px solid #999;border-radius:0;box-shadow:inset 1px 1px 2px rgba(0,0,0,.2)}
+input:focus{outline:none;border-color:var(--link)}
+button{padding:3px 10px;border:1px solid #999;border-radius:3px;background:linear-gradient(#fff,#ddd);color:#333;font-weight:bold;white-space:nowrap;cursor:pointer}
+button:hover{background:linear-gradient(#fff,#ccc)}
 
-/* Login form */
-form{max-width:440px;padding-top:20vh;display:flex;gap:8px;flex-wrap:wrap}
-#err{width:100%;margin:0 16px;color:#f77}
+/* A box header: the login box's title and the "Continue" heading. */
+.h{padding:5px 8px;border:1px solid var(--line);background:linear-gradient(#fff,#e2e2e2);color:#333;font-size:14px;font-weight:bold}
 
-/* Top bar: logo (a link to Home), search box with a magnifier, Sign out.
-   On narrow screens the logo shows only its round icon. */
-#top{display:flex;align-items:center;gap:16px;height:60px}
-#logo{display:flex;align-items:center;gap:8px;color:var(--fg);font-size:19px;letter-spacing:-.4px;white-space:nowrap}
-#logo i{width:28px;height:28px;border-radius:50%;background:var(--acc);display:grid;place-items:center}
-#logo i::after{content:'';width:10px;height:12px;margin-left:3px;background:var(--bg);clip-path:polygon(0 0,100% 50%,0 100%)}
-#q{max-width:640px;margin:0 auto;padding-left:42px;background:#121212 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aaa' stroke-width='2'%3E%3Ccircle cx='10' cy='10' r='7'/%3E%3Cpath d='m15 15 6 6'/%3E%3C/svg%3E") no-repeat 15px 50%/18px}
-#q:focus{outline:none;border-color:var(--acc)}
-#out,#cap button{background:var(--card);color:var(--fg);border-color:var(--card);font-weight:500;white-space:nowrap}
+/* Login: a small box with a header bar and a yellow button. */
+form{width:calc(100% - 32px);max-width:340px;margin:15vh auto 0;padding:0 12px 12px;border:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap}
+form .h{width:calc(100% + 24px);margin:0 -12px 4px;border-width:0 0 1px}
+#login button{background:linear-gradient(#fff6c4,#f5c542);border-color:#c49a1a}
+#err{width:100%;margin:0;color:var(--red)}
+
+/* Top bar: logo (a link to Home), search box, and Sign out as a small link,
+   as account links were then. On narrow screens the logo shows only its
+   round icon. */
+#top{display:flex;align-items:center;gap:16px;height:56px}
+#logo{display:flex;align-items:center;gap:6px;color:#333;font-size:22px;font-weight:bold;letter-spacing:-1px;white-space:nowrap}
+#logo em{font-style:normal;color:var(--red)}
+#logo i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 2px rgba(0,0,0,.4);
+  background:radial-gradient(circle at 50% 25%,#f99,#d00 55%,#800)}
+#logo i::after{content:'';width:9px;height:11px;margin-left:2px;background:#fff;clip-path:polygon(0 0,100% 50%,0 100%)}
+#q{max-width:420px;margin:0 auto}
+#out{padding:0;border:0;background:none;color:var(--link);font-weight:normal;text-decoration:underline}
 @media (max-width:559px){#top{gap:10px}#logo b{display:none}}
 
-/* Breadcrumb path; the folder you are in is the page heading. */
-nav{margin:4px 0 16px;color:var(--dim);overflow-wrap:anywhere}
-nav a{color:var(--dim)}
-nav a:last-child{color:var(--fg);font-size:20px;font-weight:700}
+/* Breadcrumb path in a glossy blue bar; the folder you are in is black. */
+nav{margin:0 0 12px;padding:6px 10px;border:1px solid #9fb4d6;border-radius:4px;background:linear-gradient(#f3f7fd,#d3e0f3);color:var(--dim);overflow-wrap:anywhere}
+nav a{font-weight:bold}
+nav a:hover{text-decoration:underline}
+nav a:last-child{color:var(--fg)}
 
-/* Player, then the title, the folder and a Close button. The player stays at
-   the top of the screen while the list scrolls under it; empty, it takes no
-   space. On phones it reaches from edge to edge. z-index keeps the tiles,
+/* Player: the title, the folder and a Close button, then the video. It stays
+   at the top of the screen while the list scrolls under it; empty, it takes
+   no space. On phones it reaches from edge to edge. z-index keeps the tiles,
    which are positioned for their badges, from sliding over it. */
 #player{position:sticky;top:0;z-index:1;background:var(--bg);display:flow-root;margin:0 -16px}
+#player:not(:empty){padding-bottom:10px}
 video,audio{display:block;width:100%}
 video{max-height:55vh;background:#000}
-audio{margin-top:8px;padding:0 16px}
+audio{padding:0 16px}
 #player img{display:block;max-width:100%;max-height:55vh;margin:0 auto}
-#cap{display:flex;align-items:flex-start;gap:12px;padding:10px 16px 12px}
+#cap{display:flex;align-items:flex-start;gap:12px;padding:8px 16px}
 #cap div{flex:1;min-width:0}
-#cap h1{margin:0;font-size:16px;line-height:1.3;overflow-wrap:anywhere}
-#cap p{margin:2px 0 0;color:var(--dim);font-size:14px}
+#cap h1{margin:0;font-size:17px;line-height:1.25;overflow-wrap:anywhere}
+#cap p{margin:2px 0 0;color:var(--dim);font-size:12px}
+#cap p:not(:empty)::before{content:'From: '}
 @media (min-width:700px){
   #player{margin:0}
-  video,#player img{border-radius:12px}
   audio{padding:0}
-  #cap{padding:12px 0 16px}
+  #cap{padding:4px 0 8px}
   #cap h1{font-size:20px}
 }
 
-/* While something plays on a wide screen the page splits in two, like a
-   video site: the player on the left (still pinned), the folder path and the
-   list on the right as a column of compact rows. */
+/* While something plays on a wide screen the page splits in two: the player
+   on the left (still pinned), the folder path and the list on the right as a
+   column of compact rows. */
 @media (min-width:1000px){
-  #app.watching{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,400px);column-gap:24px;align-items:start}
+  #app.watching{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,340px);column-gap:20px;align-items:start}
   #app.watching #top{grid-column:1/-1}
   #app.watching #player{grid-area:2/1/4/2}
   #app.watching nav{grid-area:2/2/3/3}
@@ -86,41 +101,48 @@ audio{margin-top:8px;padding:0 16px}
 }
 
 /* The list. By default (phones, and the column beside the player) each entry
-   is a compact row: a picture on the left, title and details on the right.
-   Folders get a round letter badge, files a colored 16:9 tile that shows the
-   kind of file and, in its corner, the size or the saved position. A
-   folder's files share a range of colors. */
-ul{list-style:none;margin:0;padding:0 0 24px;display:grid;gap:12px}
-li a{display:flex;gap:12px;align-items:flex-start;color:var(--fg)}
+   is a compact row with a dotted line under it: a picture on the left, the
+   title as a bold link and the details on the right. Folders get a square
+   letter badge, files a framed, glossy 4:3 tile that shows the kind of file
+   and, in its corner, the size or the saved position. A folder's files share
+   a range of colors. */
+ul{list-style:none;margin:0;padding:0 0 24px;display:grid;gap:8px}
+li:not(.h){padding-bottom:8px;border-bottom:1px dotted #bbb}
+li a{display:flex;gap:10px;align-items:flex-start}
 li.dir a{align-items:center}
 .t{min-width:0}
-.t span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:500;line-height:1.3}
-.t small{display:block;margin-top:2px;color:var(--dim);font-size:13px}
-.av{flex:0 0 48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:20px;font-weight:600;background:hsl(var(--h) 35% 32%)}
-.tile{position:relative;flex:0 0 42%;max-width:168px;aspect-ratio:16/9;border-radius:8px;display:grid;place-items:center;
-  background:linear-gradient(135deg,hsl(var(--h) 40% 30%),hsl(calc(var(--h) + 50) 40% 15%));font-size:28px;color:#fff}
+.t span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:bold;line-height:1.25}
+li a:hover .t span{text-decoration:underline}
+.t small{display:block;margin-top:3px;color:var(--dim);font-size:12px}
+li:not(.dir) .t small:not(:empty)::before{content:'From: '}
+.av{flex:0 0 46px;height:46px;border:1px solid #999;display:grid;place-items:center;font-size:20px;font-weight:bold;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.4);
+  background:linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,0) 50%),hsl(var(--h) 50% 48%)}
+.tile{position:relative;flex:0 0 36%;max-width:130px;aspect-ratio:4/3;border:1px solid #999;display:grid;place-items:center;font-size:26px;color:#fff;
+  background:linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,0) 50%),linear-gradient(135deg,hsl(var(--h) 55% 55%),hsl(calc(var(--h) + 50) 55% 30%))}
 .tile::before{content:'';opacity:.85}
 .video::before{width:22%;aspect-ratio:1;background:#fff;clip-path:polygon(28% 15%,28% 85%,88% 50%)}
 .audio::before{content:'\266A'}
 .pic::before{width:32%;aspect-ratio:3/2;background:#fff;clip-path:polygon(0 100%,30% 35%,50% 65%,68% 45%,100% 100%)}
 .pdf::before{content:'PDF';font-size:.6em;font-weight:700;letter-spacing:1px}
-/* A video's thumbnail covers its tile once it has loaded. */
-.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
-.tile b{position:absolute;right:6px;bottom:6px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.8);font-size:12px;font-weight:600}
-.tile b.at{background:var(--acc);color:#000}
+/* A video's thumbnail fills its tile once it has loaded (class ok), with
+   black bars above and below, as on a 4:3 screen. */
+.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.tile img.ok{background:#000}
+.tile b{position:absolute;right:2px;bottom:2px;padding:0 3px;background:rgba(0,0,0,.85);font-size:11px}
+.tile b.at{background:var(--red)}
 /* "Continue" heading, and the note under a long search. */
-li.h{grid-column:1/-1;margin-top:4px;font-size:20px;font-weight:700}
-li.more .t span{color:var(--dim);font-weight:400}
+li.h{grid-column:1/-1;margin-top:4px}
+li.more .t span{color:var(--dim);font-weight:normal}
 
-/* Wide screens without a player: files as a grid of cards, the tile on top
-   and the title below it. Folders stay compact, and a switch between folders
-   and files (after the Continue cards, or after the folders) starts a new
-   grid row. */
+/* Wide screens without a player: files as a grid of small cards, the tile on
+   top and the title below it. Folders stay compact, and a switch between
+   folders and files (after the Continue cards, or after the folders) starts
+   a new grid row. */
 @media (min-width:700px){
-  #app:not(.watching) ul{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:28px 16px}
-  #app:not(.watching) li:not(.dir) a{flex-direction:column;gap:10px}
-  #app:not(.watching) .tile{flex:none;width:100%;max-width:none;border-radius:12px;font-size:48px}
-  #app:not(.watching) .tile b{font-size:13px}
+  #app:not(.watching) ul{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:20px 14px}
+  #app:not(.watching) li:not(.h){padding:0;border:0}
+  #app:not(.watching) li:not(.dir) a{flex-direction:column;gap:6px}
+  #app:not(.watching) .tile{flex:none;width:100%;max-width:none;font-size:40px}
   #app:not(.watching) li.dir + li:not(.dir),#app:not(.watching) li:not(.dir) + li.dir{grid-column-start:1}
 }
 </style>
@@ -128,6 +150,7 @@ li.more .t span{color:var(--dim);font-weight:400}
 <body>
 <!-- Shown only when the server answers 401 (not logged in). -->
 <form id="login" hidden>
+  <b class="h">Sign in to HomeStream</b>
   <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
   <button>Sign in</button>
   <p id="err"></p>
@@ -136,7 +159,7 @@ li.more .t span{color:var(--dim);font-weight:400}
 <!-- The library browser. Shown once the file list has loaded. -->
 <main id="app" hidden>
   <div id="top">
-    <a id="logo" href="#/"><i></i><b>HomeStream</b></a>
+    <a id="logo" href="#/"><i></i><b>Home<em>Stream</em></b></a>
     <input id="q" type="search" placeholder="Search everything…" autocomplete="off">
     <button id="out">Sign out</button>
   </div>
@@ -272,6 +295,7 @@ function fileRow(f, small) {
   if (kind(f.p) === 'video') {
     const img = el('img');
     img.loading = 'lazy'; img.alt = '';
+    img.onload = () => img.className = 'ok';
     img.onerror = () => img.remove();
     img.src = '/t/' + enc(f.p) + '?s=' + f.s;
     tile.append(img);
@@ -281,9 +305,10 @@ function fileRow(f, small) {
 }
 
 // Open file f, tapped in list entry a. A PDF opens in the browser's own viewer
-// in a new tab and leaves the player alone. Anything else replaces the player,
-// which stays at the top of the screen while the list keeps its place: an
-// image is simply shown, audio and video play from the saved position.
+// in a new tab and leaves the player alone. Anything else replaces the player
+// (caption first, then the media), which stays at the top of the screen while
+// the list keeps its place: an image is simply shown, audio and video play
+// from the saved position.
 // playsInline stops iPhones from forcing fullscreen. Starting from a tap or
 // click is what allows autoplay and the new tab, so everything happens at once
 // and the position is fetched alongside.
@@ -296,7 +321,7 @@ function play(f, a) {
   // restarted), reloading the list brings the login form back.
   m.onerror = load;
   m.src = url;
-  // Caption: title, folder and a Close button that saves the position and
+  // Caption above the media: title, folder and a Close button that saves the position and
   // removes the player, which stops it.
   const cap = el('div'), t = el('div'), x = el('button', '', 'Close');
   cap.id = 'cap';
@@ -307,7 +332,7 @@ function play(f, a) {
     $('#player').replaceChildren(); document.title = 'HomeStream';
     show(false, a);
   };
-  $('#player').replaceChildren(m, cap);
+  $('#player').replaceChildren(cap, m);
   show(true, a);
   // An image has no position, so there is nothing to save or resume.
   if (k === 'pic') { save = () => {}; return; }
@@ -372,10 +397,10 @@ function render() {
   const pre = dir ? dir + '/' : '';
   const words = $('#q').value.toLowerCase().split(/\s+/).filter(Boolean);
 
-  // Breadcrumbs: Home / Folder / Subfolder, each part a link to that folder.
+  // Breadcrumbs: Home › Folder › Subfolder, each part a link to that folder.
   const parts = dir ? dir.split('/') : [];
   $('#crumbs').replaceChildren(link('#/', 'Home'), ...parts.flatMap((p, i) =>
-    [' / ', link('#/' + encodeURIComponent(parts.slice(0, i + 1).join('/')), p)]));
+    [' › ', link('#/' + encodeURIComponent(parts.slice(0, i + 1).join('/')), p)]));
   $('#q').placeholder = dir ? `Search in ${parts.at(-1)}…` : 'Search everything…';
 
   let rows;
